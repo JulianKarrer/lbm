@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from scipy.optimize import curve_fit
+
+import subprocess
+from io import StringIO
+
+plt.rcParams.update({"text.usetex": True,})
+
+DUMP_EVERY = 1
+NX = 128
+NY = 128
+TOTAL_STEPS = 500
+OMEGA = 0.5
+
+# compile the program
+subprocess.run(["cmake", "--build", "build"], check=True)
+
+# run the program, get the output
+res = subprocess.run([
+        "./main", 
+        "-w", str(OMEGA),
+        "-nx", str(NX),
+        "-ny", str(NY),
+        "-of", str(DUMP_EVERY),
+        "-s", str(TOTAL_STEPS),
+        "-ov", # output velocity field
+    ], cwd="build",stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,check=False).stdout
+
+print(res)
+
+# parse the program output into floats
+frames = []
+for step in res.split("#"):
+    try:
+        df = pd.read_csv(StringIO(step), header=None, dtype=np.float64)
+        frames.append(df.values)
+    except:
+        ...
+print("number of frames:", len(frames))
+
+# setup animation
+nrows, ncols = frames[0].shape
+x = np.arange(ncols)
+y = np.arange(nrows)
+X, Y = np.meshgrid(x, y)
+
+# settings
+TITLE = str(nrows)+"x"+str(ncols)+' LB-2DQ9-PBC Shear Wave Decay ('+str(DUMP_EVERY*len(frames))+" steps)"
+CMAP = "Spectral_r"
+LEVELS = 200
+CBAR_TITLE = r"$u_x$"
+
+# Initial contour; levels are fixed then
+fig, ax = plt.subplots()
+fig.set_size_inches(12, 10, forward=True)
+levels = np.linspace(np.min(frames[0]), np.max(frames[0]), LEVELS)
+contour = ax.contourf(X, Y, frames[0], levels=levels, cmap=CMAP)
+cbar = fig.colorbar(contour, ax=ax)
+cbar.set_label(CBAR_TITLE)
+ax.set_title(TITLE)
+ax.set_xlabel("x")
+ax.set_ylabel("y")
+
+def update(frame_idx):
+    ax.clear()
+    cf = ax.contourf(X, Y, frames[frame_idx], levels=levels, cmap=CMAP)
+    ax.set_title(TITLE)
+    return cf.collections
+
+anim = animation.FuncAnimation(
+    fig,                # the figure to update
+    update,             # update function
+    frames=len(frames), # number of frames
+    interval=16,        # delay between frames in ms
+    blit=True           # blitting for performance
+)
+
+
+# plt.show()
+
+try:
+    # REQUIRES FFMPEG
+    anim.save('animation-wall.mp4', writer='ffmpeg', dpi=300)
+except:
+    ...
+
+# print("DONE")
