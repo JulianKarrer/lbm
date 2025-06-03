@@ -11,11 +11,16 @@ from io import StringIO
 
 plt.rcParams.update({"text.usetex": True,})
 
-DUMP_EVERY = 1
+# NX = 1024
+# NY = 1024
+# TOTAL_STEPS = 200_000
+# DUMP_EVERY = int(TOTAL_STEPS/(60*20))
 NX = 128
 NY = 128
-TOTAL_STEPS = 500
-OMEGA = 0.5
+TOTAL_STEPS = 1000
+DUMP_EVERY = 1
+OMEGA = 1.4
+DATA_FILE_NAME = "lid-driven"+str(NX)+"x"+str(NY)+"s"+str(TOTAL_STEPS)+".npy"
 
 # compile the program
 subprocess.run(["cmake", "--build", "build"], check=True)
@@ -27,11 +32,12 @@ res = subprocess.run([
         "-nx", str(NX),
         "-ny", str(NY),
         "-of", str(DUMP_EVERY),
-        "-s", str(TOTAL_STEPS),
+        "-s", str(TOTAL_STEPS+1),
         "-ov", # output velocity field
+        "-ld", # lid driven cavity
+        "-u", str(0.1),
+        "-rho", str(1.0),
     ], cwd="build",stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,check=False).stdout
-
-print(res)
 
 # parse the program output into floats
 frames = []
@@ -42,6 +48,9 @@ for step in res.split("#"):
     except:
         ...
 print("number of frames:", len(frames))
+frames = np.array(frames)
+np.save(DATA_FILE_NAME, frames)
+# frames = np.load(DATA_FILE_NAME)
 
 # setup animation
 nrows, ncols = frames[0].shape
@@ -53,12 +62,12 @@ X, Y = np.meshgrid(x, y)
 TITLE = str(nrows)+"x"+str(ncols)+' LB-2DQ9-PBC Shear Wave Decay ('+str(DUMP_EVERY*len(frames))+" steps)"
 CMAP = "Spectral_r"
 LEVELS = 200
-CBAR_TITLE = r"$u_x$"
+CBAR_TITLE = r"$\left|\vec{\mathbf{u}}\right|$"
 
 # Initial contour; levels are fixed then
 fig, ax = plt.subplots()
-fig.set_size_inches(12, 10, forward=True)
-levels = np.linspace(np.min(frames[0]), np.max(frames[0]), LEVELS)
+fig.set_size_inches(12.8, 10.8, forward=True)
+levels = np.linspace(np.min(frames), np.max(frames), LEVELS)
 contour = ax.contourf(X, Y, frames[0], levels=levels, cmap=CMAP)
 cbar = fig.colorbar(contour, ax=ax)
 cbar.set_label(CBAR_TITLE)
@@ -73,11 +82,11 @@ def update(frame_idx):
     return cf.collections
 
 anim = animation.FuncAnimation(
-    fig,                # the figure to update
-    update,             # update function
-    frames=len(frames), # number of frames
-    interval=16,        # delay between frames in ms
-    blit=True           # blitting for performance
+    fig,                    # the figure to update
+    update,                 # update function
+    frames=frames.shape[0], # number of frames
+    interval=16,            # delay between frames in ms
+    blit=True               # blitting for performance
 )
 
 
@@ -85,7 +94,7 @@ anim = animation.FuncAnimation(
 
 try:
     # REQUIRES FFMPEG
-    anim.save('animation-wall.mp4', writer='ffmpeg', dpi=300)
+    anim.save('lid-driven-test.mp4', writer='ffmpeg', dpi=100, fps=60)
 except:
     ...
 

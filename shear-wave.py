@@ -13,8 +13,8 @@ plt.rcParams["figure.figsize"] = (4*2.5,3*2.5)
 subprocess.run(["cmake", "--build", "build"], check=True)
 
 DUMP_EVERY = 100
-NX = 64
-NY = 64
+NX = 512
+NY = 512
 TOTAL_STEPS = 100_000
 OMEGA_STEPS = 10
 OMEGAS = [(1./OMEGA_STEPS)*i for i in range(1,OMEGA_STEPS+1)]

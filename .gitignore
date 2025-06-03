@@ -2,3 +2,5 @@
 /build
 *.mp4
 *.jpg
+/out
+*.npy
