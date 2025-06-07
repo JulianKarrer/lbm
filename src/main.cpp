@@ -2,7 +2,8 @@
 #include <iostream>
 #include <fstream>
 #include <stdlib.h>
-#include <argparse/argparse.hpp>
+#include <chrono>
+#include "argparse/argparse.hpp"
 #include "Kokkos_Core.hpp"
 
 
@@ -18,7 +19,7 @@
 #define UINT unsigned long long
 // define an accessor macro for fields so that their memory layout 
 // can be changed without refactoring every single function
-#define VIEW(view, i, j, k) view(i, j, k)
+#define VIEW(view, x, y, q) view(q, y, x)
 
 
 // PARAMETERS
@@ -81,8 +82,8 @@ using Vel_t = Kokkos::View<FLOAT**[2], Kokkos::LayoutRight>;
 /// Host-side field of velocity values (dir,x,y)
 using Vel_t_host = Kokkos::View<FLOAT**[2], Kokkos::LayoutRight, Kokkos::HostSpace::device_type, Kokkos::Experimental::DefaultViewHooks>;
 
-/// Field of distribution values (dir,x,y)
-using Dst_t = Kokkos::View<FLOAT**[Q], Kokkos::LayoutRight>;
+/// Field of distribution values
+using Dst_t = Kokkos::View<FLOAT***, Kokkos::LayoutRight>; // Q Y X
 
 /// Field of coordinates of bounce-back, no-slip walls
 using Bdy_t = Kokkos::View<UINT*[2], Kokkos::LayoutRight>;
@@ -97,7 +98,7 @@ using SFL = Kokkos::View<FLOAT>;
 
 // FUNCTIONS
 
-/// @brief Use a one-step, two-grid push-scheme to access coherent memory in f, compute a new pdf value locally (collision) 
+/// @brief Use a one-step, two-grid push-scheme to access memory in f, compute a new pdf value locally (collision) 
 /// and then write write to neighbours (streaming) in memory-order. 
 /// 
 /// -> Wittmann, Zeiser, Hager, Wellein "Comparison of different propagation steps for lattice Boltzmann methods"
@@ -106,13 +107,10 @@ using SFL = Kokkos::View<FLOAT>;
 void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 	Kokkos::parallel_for(
 		"push periodic", 
-		Kokkos::MDRangePolicy({0, 0}, {NX, NY}), 
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 
 			// ###### READ VALUES #############################################
-			// load f_i values into registers to avoid coalescing requirements for multiple reads
-			// - we prefer coherent reads over coherent writes since they can be delayed and buffered to hide latency
-			//   while buffered reads stall computation, so this section reads immediately subsequent memory
 			const FLOAT f_0 { VIEW(f, x, y, 0) };
 			const FLOAT f_1 { VIEW(f, x, y, 1) };
 			const FLOAT f_2 { VIEW(f, x, y, 2) };
@@ -167,16 +165,22 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			const FLOAT w_1_9  {rho * 1./9.};
 			const FLOAT w_1_36 {rho * 1./36.};
 
-			// to order writes to be as coherent as possible, write to xl, x xr and within those to yd, y yu:
-			// 7 3 6 -> 4 0 2 -> 8 1 5 (bottom to top, left to right)
+			// order writes such that changes along the fastest varying index into memory are subsequent
+			// | 6   2   5 |
+			// |   \ | /   |
+			// | 3 - 0 - 1 |
+			// |   / | \   |
+			// | 7   4   8 |
 			VIEW(buf, xl, yd, 7) = f_7 + OMEGA * ((w_1_36 * (1- 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_7);
-			VIEW(buf, xl, y , 3) = f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3);
-			VIEW(buf, xl, yu, 6) = f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6);
 			VIEW(buf, x , yd, 4) = f_4 + OMEGA * ((w_1_9 * (1- 3*uy+ uy_2- u_2_times_3_2)) - f_4);
-			VIEW(buf, x , y , 0) = f_0 + OMEGA * ((w_4_9 * (1- u_2_times_3_2)) - f_0);
-			VIEW(buf, x , yu, 2) = f_2 + OMEGA * ((w_1_9 * (1+ 3*uy+ uy_2- u_2_times_3_2)) - f_2);
 			VIEW(buf, xr, yd, 8) = f_8 + OMEGA * ((w_1_36 * (1- 3*uymux+ uymux_2- u_2_times_3_2)) - f_8);
+
+			VIEW(buf, xl, y , 3) = f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3);
+			VIEW(buf, x , y , 0) = f_0 + OMEGA * ((w_4_9 * (1- u_2_times_3_2)) - f_0);
 			VIEW(buf, xr, y , 1) = f_1 + OMEGA * ((w_1_9 * (1+ 3*ux+ ux_2- u_2_times_3_2)) - f_1);
+
+			VIEW(buf, xl, yu, 6) = f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6);
+			VIEW(buf, x , yu, 2) = f_2 + OMEGA * ((w_1_9 * (1+ 3*uy+ uy_2- u_2_times_3_2)) - f_2);
 			VIEW(buf, xr, yu, 5) = f_5 + OMEGA * ((w_1_36 * (1+ 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_5);
 		}
 	);
@@ -185,12 +189,12 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
     buf = temp;
 }
 
-void push_interior(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
+void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_eq, SFL &u_lid){
 	Kokkos::parallel_for(
 		"push interior", 
-		Kokkos::MDRangePolicy({1, 1}, {NX-1, NY-1}), // restrict loop bounds to only interior points
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}),
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
-			// same code as in push_periodic
+			// load the distribution
 			const FLOAT f_0 { VIEW(f, x, y, 0) };
 			const FLOAT f_1 { VIEW(f, x, y, 1) };
 			const FLOAT f_2 { VIEW(f, x, y, 2) };
@@ -200,19 +204,18 @@ void push_interior(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			const FLOAT f_6 { VIEW(f, x, y, 6) };
 			const FLOAT f_7 { VIEW(f, x, y, 7) };
 			const FLOAT f_8 { VIEW(f, x, y, 8) };
+			// load relevant global scalars
 			const UINT NX{nx()};
 			const UINT NY{ny()};
 			const FLOAT OMEGA{om()};
+			const FLOAT U_LID{u_lid()};
+			const FLOAT RHO_EQ{rho_eq()};
+			// calculate density and velocity
 			const FLOAT rho { f_0 + f_1 + f_2 + f_3 + f_4 + f_5 + f_6 + f_7 + f_8 };
 			const FLOAT rho_inv {1./rho};
 		 	const FLOAT ux { (f_1 - f_3 + f_5 - f_6 - f_7 + f_8) * rho_inv };
 			const FLOAT uy { (f_2 - f_4 + f_5 + f_6 - f_7 - f_8) * rho_inv };
-			// here the only difference in the kernel: no conditionals required!
-			const UINT xr { x+1 };
-			const UINT xl { x-1 };
-			const UINT yu { y+1 };
-			const UINT yd { y-1 };
-			// from here: the same code as above again
+			// calculate equilibirum values
 			const FLOAT ux_2 {4.5 * ux * ux};
 			const FLOAT uy_2 {4.5 * uy * uy};
 			const FLOAT uymux {uy - ux};
@@ -223,40 +226,19 @@ void push_interior(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			const FLOAT w_4_9  {rho * 4./9.};
 			const FLOAT w_1_9  {rho * 1./9.};
 			const FLOAT w_1_36 {rho * 1./36.};
-			VIEW(buf, xl, yd, 7) = f_7 + OMEGA * ((w_1_36 * (1- 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_7);
-			VIEW(buf, xl, y , 3) = f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3);
-			VIEW(buf, xl, yu, 6) = f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6);
-			VIEW(buf, x , yd, 4) = f_4 + OMEGA * ((w_1_9 * (1- 3*uy+ uy_2- u_2_times_3_2)) - f_4);
-			VIEW(buf, x , y , 0) = f_0 + OMEGA * ((w_4_9 * (1- u_2_times_3_2)) - f_0);
-			VIEW(buf, x , yu, 2) = f_2 + OMEGA * ((w_1_9 * (1+ 3*uy+ uy_2- u_2_times_3_2)) - f_2);
-			VIEW(buf, xr, yd, 8) = f_8 + OMEGA * ((w_1_36 * (1- 3*uymux+ uymux_2- u_2_times_3_2)) - f_8);
-			VIEW(buf, xr, y , 1) = f_1 + OMEGA * ((w_1_9 * (1+ 3*ux+ ux_2- u_2_times_3_2)) - f_1);
-			VIEW(buf, xr, yu, 5) = f_5 + OMEGA * ((w_1_36 * (1+ 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_5);
-		}
-	);
-	auto temp = f;
-    f = buf;
-    buf = temp;
-}
+			const FLOAT f_7_eq { f_7 + OMEGA * ((w_1_36 * (1- 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_7) };
+			const FLOAT f_3_eq { f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3) };
+			const FLOAT f_6_eq { f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6) };
+			const FLOAT f_4_eq { f_4 + OMEGA * ((w_1_9 * (1- 3*uy+ uy_2- u_2_times_3_2)) - f_4) };
+			const FLOAT f_0_eq { f_0 + OMEGA * ((w_4_9 * (1- u_2_times_3_2)) - f_0) };
+			const FLOAT f_2_eq { f_2 + OMEGA * ((w_1_9 * (1+ 3*uy+ uy_2- u_2_times_3_2)) - f_2) };
+			const FLOAT f_8_eq { f_8 + OMEGA * ((w_1_36 * (1- 3*uymux+ uymux_2- u_2_times_3_2)) - f_8) };
+			const FLOAT f_1_eq { f_1 + OMEGA * ((w_1_9 * (1+ 3*ux+ ux_2- u_2_times_3_2)) - f_1) };
+			const FLOAT f_5_eq { f_5 + OMEGA * ((w_1_36 * (1+ 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_5) };
 
-void boundary_correct_lid(Dst_t& f, SUI &nx, SUI &ny, SFL &rho_eq, SFL &u_lid){
-	Kokkos::parallel_for(
-		"correct boundaries for lid-driven cavity", 
-		Kokkos::MDRangePolicy({0, 0}, {NX, NY}), 
-		KOKKOS_LAMBDA(const UINT x, const UINT y){
-			const UINT NX{nx()};
-			const UINT NY{ny()};
-			const FLOAT f_1 { VIEW(f, x, y, 1) };
-			const FLOAT f_2 { VIEW(f, x, y, 2) };
-			const FLOAT f_3 { VIEW(f, x, y, 3) };
-			const FLOAT f_4 { VIEW(f, x, y, 4) };
-			const FLOAT f_5 { VIEW(f, x, y, 5) };
-			const FLOAT f_6 { VIEW(f, x, y, 6) };
-			const FLOAT f_7 { VIEW(f, x, y, 7) };
-			const FLOAT f_8 { VIEW(f, x, y, 8) };
 			// ###### STREAM VALUES, RESPECTING BOUNDARY CONDITIONS ###########
-			// bounce back contributions from the wall to the corresponding neighbouring cell
-			// (no overwrites should occur here so this is inherently thread-safe)
+			// bounce back contributions from the wall to the corresponding channel of the current cell
+			// (no overwrites should occur here so this is thread-safe)
 			// 
 			// 1 <-> 3     	| 6   2   5 |
 			// 2 <-> 4     	|   \ | /   |
@@ -264,124 +246,43 @@ void boundary_correct_lid(Dst_t& f, SUI &nx, SUI &ny, SFL &rho_eq, SFL &u_lid){
 			// 6 <-> 8		|   / | \   |
 			// 				| 7   4   8 |
 			//
+			// check if node is adjacent to any boundary
+			const bool l{x==0};
+			const bool r{x==(NX-1)};
+			const bool t{y==(NY-1)};
+			const bool b{y==0};
+			const bool lb{l||b}; // bottom left corner
+			const bool lt{l||t}; // top left corner
+			const bool rb{r||b}; // bottom right corner
+			const bool rt{r||t}; // top right corner
+			// clamp x and y of neighbours to remain in bounds
 			const UINT xl{(x>0)?(x-1):x};
 			const UINT xr{(x<NX-1)?(x+1):x};
 			const UINT yu{(y<NY-1)?(y+1):y};
 			const UINT yd{(y>0)?(y-1):y};
-			const bool left{x==0};
-			const bool right{x==(NX-1)};
-			const bool top{y==(NY-1)};
-			const bool bottom{y==0};
-			const bool corner{(left || right) && (top || bottom)};
-
-			const FLOAT U_LID{u_lid()};
-			const FLOAT RHO_EQ{rho_eq()};
-			// Δf = -2 w_i ρ_w (c_i * u_w)/(c_s^2) 
-			// 1/c_s^2 = 1/(1/3) = 3
+			// calculate the change in distribution Δf due to the moving top wall:
+			// 		Δf = -2 w_i ρ_w (c_i * u_w)/(c_s^2) 
+			// 		1/c_s^2 = 1/(1/3) = 3
 			// for i=6: uw*c_i = -1, total factor -2*(-1)/(1/3)=6
 			// for i=8: uw*c_i =  1, total factor -2*( 1)/(1/3)=-6
 			// since w_i = 1/36 either way we get +- 6 w_i ρ = +- 6/36 ρ = 1./6. ρ
-			const FLOAT df = {-2.0 * (1./36.) * RHO_EQ * (U_LID * (-1.))/(1./3.)}; 
-
-
-			if (left && !corner){
-				VIEW(f, xr, y , 1) = f_3;
-				VIEW(f, xr, yu, 5) = f_7;
-				VIEW(f, xr, yd, 8) = f_6;
-			}
-			if (right && !corner){
-				VIEW(f, xl, y , 3) = f_1;
-				VIEW(f, xl, yu, 6) = f_8;
-				VIEW(f, xl, yd, 7) = f_5;
-			}
-			if (bottom && !corner){
-				VIEW(f, x , yu, 2) = f_4;
-				VIEW(f, xl, yu, 6) = f_8;
-				VIEW(f, xr, yu, 5) = f_7;
-			}
-			if (top && !corner){
-				VIEW(f, x , yd, 4) = f_2;
-				VIEW(f, xr, yd, 8) = f_6 + df;
-				VIEW(f, xl, yd, 7) = f_5 - df;
-			}
-			// corners
-			if (left && top){
-				VIEW(f, xr, yd, 8) = f_6 + df;
-			}
-			if (right && top){
-				VIEW(f, xl, yd, 7) = f_5 - df;
-			}
-			if (left && bottom){
-				VIEW(f, xr, yu, 5) = f_7;
-			}
-			if (right && bottom){
-				VIEW(f, xl, yu, 6) = f_8;
-			}
-
-			// // compute change in f due to moving wall:
-			// const FLOAT U_LID{u_lid()};
-			// const FLOAT RHO_EQ{rho_eq()};
-			// // Δf = -2 w_i ρ_w (c_i * u_w)/(c_s^2) 
-			// // 1/c_s^2 = 1/(1/3) = 3
-			// // for i=6: uw*c_i = -1, total factor -2*(-1)/(1/3)=6
-			// // for i=8: uw*c_i =  1, total factor -2*( 1)/(1/3)=-6
-			// // since w_i = 1/36 either way we get +- 6 w_i ρ = +- 6/36 ρ = 1./6. ρ
-			// constexpr FLOAT w{1./6.};
-			// const FLOAT df = 0.;//{w * RHO_EQ}; 
-			// if (left){
-			// 	// left wall
-			// 	// bounce 3 -> 1
-			// 	VIEW(f, xr, y, 1) = f_3;
-			// 	if (!top){
-			// 		// bounce 7 -> 5 if not at top left
-			// 		VIEW(f, xr, yu, 5) = f_7;
-			// 	}
-			// 	if (!bottom){
-			// 		// bounce 6 -> 8 if not at bottom left
-			// 		// + add moving wall contribution at top left corner
-			// 		VIEW(f, xr, yd, 8) = f_6 + (top) ? (df) : (0.);
-			// 	}
-			// }
-			// if (right){
-			// 	// right wall
-			// 	// bounce 1 -> 3
-			// 	VIEW(f, xl, y, 3) = f_1;
-			// 	if (!top){
-			// 		// bounce 8 -> 6 if not at top right
-			// 		VIEW(f, xl, yu, 6) = f_8;
-			// 	}
-			// 	if (!bottom){
-			// 		// bounce 5 -> 7 if not at bottom right
-			// 		// + add moving wall contribution at top right corner
-			// 		VIEW(f, xl, yd, 7) = f_5 - (top) ? (df) : (0.);
-			// 	}
-			// }
-			// if (bottom){
-			// 	// bottom wall
-			// 	// bounce 4 -> 2
-			// 	VIEW(f, x, yu, 2) = f_4;
-			// 	if (!left && !right){
-			// 		// bounce 8 -> 6 if not on another border
-			// 		// (right is already bounced, left is unsafe)
-			// 		VIEW(f, xl, yu, 6) = f_8;
-			// 		// bounce 7 -> 5 if not on another border
-			// 		// (left is already bounced, right is unsafe)
-			// 		VIEW(f, xr, yu, 5) = f_7;
-			// 	}
-			// }
-			// if (top){
-			// 	// top wall
-			// 	// bounce 2 -> 4
-			// 	VIEW(f, x, yd, 4) = f_2;
-			// 	if ((!left) && (!right)){ // left and right border are already accounted for
-			// 		// bounce 6 -> 8
-			// 		VIEW(f, xr, yd, 8) = f_6 + df;
-			// 		// bounce 5 -> 7
-			// 		VIEW(f, xl, yd, 7) = f_5 - df;
-			// 	}
-			// }
+			// const FLOAT df = {-2.0 * (1./36.) * RHO_EQ * (U_LID * (-1.))/(1./3.)};
+			const FLOAT df = { t ? (RHO_EQ * U_LID / 6.) : 0. };  
+			// stream each channel to the corresponding neighbour node, or the current node if at a boundary
+			VIEW(buf, lb?x:xl, lb?y:yd, lb?5:7) = f_7_eq;
+			VIEW(buf, xl, y , l?1:3) 			= f_3_eq;
+			VIEW(buf, lt?x:xl, lt?y:yu, lt?8:6) = f_6_eq + df; // add contribution from moving top wall
+			VIEW(buf, x , yd, b?2:4) 			= f_4_eq;
+			VIEW(buf, x , y , 0) 				= f_0_eq;
+			VIEW(buf, x , yu, t?4:2) 			= f_2_eq;
+			VIEW(buf, rb?x:xr, rb?y:yd, rb?6:8) = f_8_eq;
+			VIEW(buf, xr, y , r?3:1) 			= f_1_eq;
+			VIEW(buf, rt?x:xr, rt?y:yu, rt?7:5) = f_5_eq - df; // add contribution from moving top wall
 		}
 	);
+	auto temp = f;
+    f = buf;
+    buf = temp;
 }
 
 void compute_densities(Den_t &rho, Dst_t &f){
@@ -518,12 +419,6 @@ void init_rest(Vel_t &vel, Den_t &rho, Dst_t &f, SFL &rho_init){
 }
 
 bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
-	// for the lid-driven cavity scene, ignore the outermost layer of boundary nodes
-	const UINT NXa {SCENE == SCENE_TYPE::LID_DRIVEN ? (NX-1) : NX};
-	const UINT X0 {SCENE == SCENE_TYPE::LID_DRIVEN ? 1 : 0};
-	const UINT NYa {SCENE == SCENE_TYPE::LID_DRIVEN ? (NY-1) : NY};
-	const UINT Y0 {SCENE == SCENE_TYPE::LID_DRIVEN ? 1 : 0};
-
 	// output depending on selected OUTPUT_TYPE
 	switch (OUTPUT)
 	{
@@ -536,7 +431,7 @@ bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
 			FLOAT max_x_vel = -1e30;
 			Kokkos::parallel_reduce(
 				"find max x-velocity",
-				Kokkos::MDRangePolicy<Kokkos::Rank<2>>({X0, Y0}, {NXa, NYa}),
+				Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {NX, NY}),
 				KOKKOS_LAMBDA(const int i, const int j, FLOAT& local_max) {
 					const FLOAT ux = vel(i, j, 0);
 					const FLOAT uy = vel(i, j, 1);
@@ -558,10 +453,10 @@ bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
 			Kokkos::deep_copy(vel_host, vel);
 			
 			// print all velocities to output stream
-			for (UINT y{Y0}; y<NYa; ++y){
-				for(UINT x{X0}; x<NXa; ++x){
-					const FLOAT ux = vel_host(x,y,0);
-					const FLOAT uy = vel_host(x,y,1);
+			for (UINT y{0}; y<NY; ++y){
+				for(UINT x{0}; x<NX; ++x){
+					const FLOAT ux = VIEW(vel_host,x,y,0);
+					const FLOAT uy = VIEW(vel_host,x,y,1);
 					const FLOAT out = SQRT(ux*ux+uy*uy);
 					if (out != out){
 						// check for NaNs and abort
@@ -570,7 +465,7 @@ bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
 					}
 					// write to output stream
 					(*OUT_STREAM) << out;
-					if (x<NXa-1){
+					if (x<NX-1){
 						// add a comma for all but the last value
 						(*OUT_STREAM) << ",";
 					}
@@ -591,21 +486,21 @@ bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
 			Kokkos::deep_copy(vel_host, vel);
 			
 			// print all x-components
-			for (UINT y{Y0}; y<NYa; ++y){
-				for(UINT x{X0}; x<NXa; ++x){
-					const FLOAT ux = vel_host(x,y,0);
+			for (UINT y{0}; y<NY; ++y){
+				for(UINT x{0}; x<NX; ++x){
+					const FLOAT ux = VIEW(vel_host,x,y,0);
 					(*OUT_STREAM) << ux;
-					if (x<NXa-1){(*OUT_STREAM) << ",";}
+					if (x<NX-1){(*OUT_STREAM) << ",";}
 				}
 				(*OUT_STREAM) << std::endl;
 			}
 			(*OUT_STREAM) << "#" << std::endl;
 			// print all y-components
-			for (UINT y{Y0}; y<NYa; ++y){
-				for(UINT x{X0}; x<NXa; ++x){
-					const FLOAT uy = vel_host(x,y,1);
+			for (UINT y{0}; y<NY; ++y){
+				for(UINT x{0}; x<NX; ++x){
+					const FLOAT uy = VIEW(vel_host,x,y,1);
 					(*OUT_STREAM) << uy;
-					if (x<NXa-1){(*OUT_STREAM) << ",";}
+					if (x<NX-1){(*OUT_STREAM) << ",";}
 				}
 				(*OUT_STREAM) << std::endl;
 			}
@@ -734,8 +629,8 @@ void parse_args(int argc, char *argv[]){
 bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
     Den_t rho("rho", NX, NY);
     Vel_t vel("vel", NX, NY);
-	Dst_t f  ("f"  , NX, NY, Q);
-    Dst_t buf("buf", NX, NY, Q);
+	Dst_t f  ("f"  , Q, NY, NX);
+    Dst_t buf("buf", Q, NY, NX);
 
 	// initialize quantities
 	// (buf need not be initialized since it is written to everywhere)
@@ -751,18 +646,22 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 		// do a single fused step of collision and streaming, tailored to the respective boundary conditions of the scene
 		switch (SCENE){
 			case SCENE_TYPE::LID_DRIVEN:
-				push_interior(f, buf, nx, ny, om);
-				boundary_correct_lid(f, nx, ny, rho_init, u);
+				push_lid_driven(f, buf, nx, ny, om, rho_init, u);
+				// boundary_correct_lid(f, nx, ny, rho_init, u);
 				break;
 			default:
 				push_periodic(f, buf, nx, ny, om); break;
 		}
-
+		// report progress
+		if (OUT_EVERY_N > 0){
+			std::cerr << t << " / " << STEPS << "\r";
+		}
 		// write results to std::out
-		if (t % OUT_EVERY_N == 0){
+		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
 			if (!output(vel, rho, f, buf)){ return false; };
 		}
     };
+
 	return true;
 }
 
@@ -801,7 +700,17 @@ int main(int argc, char *argv[]) {
 		Kokkos::deep_copy(rho, host_rho);
 
 		// Run the simulation
+		auto start {std::chrono::high_resolution_clock::now()};
 		success = run_simulation(nx, ny, om, rho, u);
+		auto end {std::chrono::high_resolution_clock::now()};
+		// print the MLUPS count
+		auto span {std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()};
+		auto mlups = (NX*NY*STEPS*1000) / span;
+		std::cerr << std::endl 
+			<< NX*NY*STEPS << " lattice updates in " 
+			<< span*1e-9 << "s => " 
+			<< mlups << " MLUPS"
+			<< std::endl;
 	}
 	(*OUT_STREAM) << std::flush;
     Kokkos::finalize();

@@ -2,13 +2,14 @@
 
 import numpy as np
 import pandas as pd
-
-from concurrent.futures import ProcessPoolExecutor
-
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
+
+from math import ceil, log10
+from concurrent.futures import ProcessPoolExecutor
+import os
 import subprocess
 from io import StringIO
 
@@ -17,17 +18,18 @@ plt.rcParams.update({"text.usetex": True,})
 RECOMPILE = False
 RUN = False
 
-NX = 1024
-NY = 1024
-TOTAL_STEPS = 100_000
+NX = 2**10 # 2048
+NY = 2**10 # 2048
+TOTAL_STEPS = 500_000#10_000_000
 # DUMP_EVERY = 1 #1_000_000-1
-DUMP_EVERY = int(TOTAL_STEPS/(60*10))
+DUMP_EVERY = int(TOTAL_STEPS/(60*20))
 OMEGA = 1.7
 U_LID = 0.1
 RHO = 1.0
 DATA_FILE_NAME = "lid-driven"+str(NX)+"x"+str(NY)+"s"+str(TOTAL_STEPS)+".csv"
+OUT_DIR = "./out2"
 
-LOAD_ENTIRE_FILE = True
+LINE_BY_LINE = False
 
 if RECOMPILE:
     # recompile the program
@@ -55,7 +57,7 @@ if RUN:
     )
 
 
-def plot_quiver(u: np.ndarray, v: np.ndarray, stride = max(NX // 32, 1)):
+def plot_quiver(u: np.ndarray, v: np.ndarray, i:int, stride = max(NX // 32, 1)):
     NX, NY = u.shape
     x = np.arange(NY)
     y = np.arange(NX)
@@ -76,14 +78,14 @@ def plot_quiver(u: np.ndarray, v: np.ndarray, stride = max(NX // 32, 1)):
         color='tab:blue'
     )
 
-    ax.set_title("Velocity Quiver Plot")
+    ax.set_title(r"Lid-Driven Cavity $"+ str(NX) +r"\times "+ str(NY) +r"$ Velocity Field at $t=" + str(DUMP_EVERY*i).zfill(ceil(log10(TOTAL_STEPS))) + r"$")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_aspect("equal")
 
     return fig
 
-def plot_streamlines(u: np.ndarray, v: np.ndarray, stride: int = 1):
+def plot_streamlines(u: np.ndarray, v: np.ndarray, i:int, stride: int = 1):
     NX, NY = u.shape
     x = np.arange(NY)
     y = np.arange(NX)
@@ -103,14 +105,14 @@ def plot_streamlines(u: np.ndarray, v: np.ndarray, stride: int = 1):
         integration_direction='forward',
         start_points=seed_points
     )
-    ax.set_title("Velocity Streamline Plot")
+    ax.set_title(r"Lid-Driven Cavity $"+ str(NX) +r"\times "+ str(NY) +r"$ Velocity Field at $t=" + str(DUMP_EVERY*i).zfill(ceil(log10(TOTAL_STEPS))) + r"$")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_aspect("equal")
     return fig
 
 
-def plot_magnitude(u: np.ndarray, v: np.ndarray):
+def plot_magnitude(u: np.ndarray, v: np.ndarray, i:int):
     NX, NY = u.shape
     x = np.arange(NY)
     y = np.arange(NX)
@@ -129,23 +131,24 @@ def plot_magnitude(u: np.ndarray, v: np.ndarray):
     cbar = fig.colorbar(pcm, ax=ax)
     cbar.set_label(r"Velocity magnitude $\left|\vec{\mathbf{u}}\right|$")
     
-    ax.set_title("Velocity Magnitude")
+    ax.set_title(r"Lid-Driven Cavity $"+ str(NX) +r"\times "+ str(NY) +r"$ Velocity Magintude at $t=" + str(DUMP_EVERY*i).zfill(ceil(log10(TOTAL_STEPS))) + r"$")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_aspect("equal")
     return fig
 
 def run(u,v,i):
-    fig_m = plot_magnitude(u,v)
-    fig_m.savefig("out/mag-"+DATA_FILE_NAME[:-3]+str(i).zfill(6)+".png")
+    print(i)
+    fig_m = plot_magnitude(u,v,i)
+    fig_m.savefig(OUT_DIR+"/mag-"+DATA_FILE_NAME[:-3]+str(i).zfill(6)+".png")
     plt.close(fig_m)
 
-    fig_q = plot_quiver(u,v)
-    fig_q.savefig("out/quiver-"+DATA_FILE_NAME[:-3]+str(i).zfill(6)+".png")
+    fig_q = plot_quiver(u,v,i)
+    fig_q.savefig(OUT_DIR+"/quiver-"+DATA_FILE_NAME[:-3]+str(i).zfill(6)+".png")
     plt.close(fig_q)
 
-    fig_s = plot_streamlines(u,v)
-    fig_s.savefig("out/stream-"+DATA_FILE_NAME[:-3]+str(i).zfill(6)+".png")
+    fig_s = plot_streamlines(u,v,i)
+    fig_s.savefig(OUT_DIR+"/stream-"+DATA_FILE_NAME[:-3]+str(i).zfill(6)+".png")
     plt.close(fig_s)
 
 # parse the program output 
@@ -153,6 +156,8 @@ frames = []
 buf = ""
 second = False
 i = 0
+if not os.path.exists(OUT_DIR):
+    os.makedirs(OUT_DIR)
 with ProcessPoolExecutor() as executor, open(f"./build/{DATA_FILE_NAME}", "r") as file:
     futures = []
     for line in file:
@@ -164,6 +169,7 @@ with ProcessPoolExecutor() as executor, open(f"./build/{DATA_FILE_NAME}", "r") a
                 uv = np.array(frames)
                 # plot in an off-thread and keep processing
                 futures.append(executor.submit(run, uv[-1], uv[-2], i))
+                # run(uv[-1], uv[-2], i,)
                 # reset buffer to keep memory consumption low
                 frames = []
                 second = False
@@ -175,4 +181,3 @@ with ProcessPoolExecutor() as executor, open(f"./build/{DATA_FILE_NAME}", "r") a
     # wait for futures to finish
     for future in futures:
             future.result()
-

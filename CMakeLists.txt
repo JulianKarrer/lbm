@@ -6,20 +6,32 @@ project(LBM)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-
-# Build type: Release with debug symbols
 if(NOT CMAKE_BUILD_TYPE)
-  set(default_build_type "RelWithDebInfo")
+  set(default_build_type "Release")
   message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
   set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE STRING
     "Choose the type of build, options are: Debug, Release, RelWithDebInfo and MinSizeRel."
     FORCE)
 endif()
 
-# Try to locate the Kokkos dependency
-set(Kokkos_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/Kokkos)
+# set compiler optimization flags  
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -ffast-math -funroll-loops -DNDEBUG" CACHE STRING "Flags for Release build" FORCE)
+set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --use_fast_math -DNDEBUG" CACHE STRING "Flags for CUDA Release build" FORCE)
 
-# Fetch Kokkos from github if not already present
+# set Kokkos flags
+set(Kokkos_ENABLE_SERIAL      ON  CACHE BOOL "")
+set(Kokkos_ENABLE_OPENMP      OFF CACHE BOOL "")
+set(Kokkos_ENABLE_THREADS     OFF CACHE BOOL "")
+set(Kokkos_ENABLE_CUDA        ON  CACHE BOOL "")
+set(Kokkos_ENABLE_PROFILING   OFF CACHE BOOL "")
+set(Kokkos_ENABLE_DEBUG       OFF CACHE BOOL "")
+set(Kokkos_ENABLE_TESTS       OFF CACHE BOOL "")
+set(Kokkos_ENABLE_EXAMPLES    OFF CACHE BOOL "")
+set(Kokkos_ENABLE_KOKKOSKERNELS ON CACHE BOOL "")
+set(Kokkos_ARCH_NATIVE        ON  CACHE BOOL "")  # auto‐detect
+set(DKokkos_ENABLE_CUDA_LAMBDA ON  CACHE BOOL "")
+
+set(Kokkos_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/Kokkos)
 find_package(Kokkos CONFIG)
 if(Kokkos_FOUND)
   message(STATUS "Found Kokkos: ${Kokkos_DIR} (version \"${Kokkos_VERSION}\")")
@@ -49,10 +61,3 @@ add_executable(
 )
 
 target_link_libraries(main Kokkos::kokkos)
-
-# Add CUDA-specific relaxed constexpr support
-if(Kokkos_ENABLE_CUDA)
-  target_compile_options(main PRIVATE 
-    "$<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>"
-  )
-endif()
