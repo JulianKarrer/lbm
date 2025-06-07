@@ -111,15 +111,15 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 
 			// ###### READ VALUES #############################################
+			const FLOAT f_7 { VIEW(f, x, y, 7) };
+			const FLOAT f_4 { VIEW(f, x, y, 4) };
+			const FLOAT f_8 { VIEW(f, x, y, 8) };
+			const FLOAT f_3 { VIEW(f, x, y, 3) };
 			const FLOAT f_0 { VIEW(f, x, y, 0) };
 			const FLOAT f_1 { VIEW(f, x, y, 1) };
-			const FLOAT f_2 { VIEW(f, x, y, 2) };
-			const FLOAT f_3 { VIEW(f, x, y, 3) };
-			const FLOAT f_4 { VIEW(f, x, y, 4) };
-			const FLOAT f_5 { VIEW(f, x, y, 5) };
 			const FLOAT f_6 { VIEW(f, x, y, 6) };
-			const FLOAT f_7 { VIEW(f, x, y, 7) };
-			const FLOAT f_8 { VIEW(f, x, y, 8) };
+			const FLOAT f_2 { VIEW(f, x, y, 2) };
+			const FLOAT f_5 { VIEW(f, x, y, 5) };
 			// load other required scalar values
 			const UINT NX{nx()};
 			const UINT NY{ny()};
@@ -128,7 +128,8 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			// ###### COMPUTE DENSITIES #######################################
 			// collect density contributions from all directions
 			const FLOAT rho {f_0 + f_1 + f_2 + f_3 + f_4 + f_5 + f_6 + f_7 + f_8};
-			const FLOAT rho_inv {1./rho};
+			constexpr FLOAT f1 {1.0};
+			const FLOAT rho_inv {f1/rho};
 
 			// ###### COMPUTE VELOCITIES ######################################
 			// contributions to x-velocities come from channels 1, 3, 5, 6, 7, 8
@@ -152,18 +153,24 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			const UINT yd{(y   == 0 ) ? (NY-1) : (y-1)};
 
 			// common subexpressions
-			const FLOAT ux_2 {4.5 * ux * ux};
-			const FLOAT uy_2 {4.5 * uy * uy};
+			//( make scalars constexpr to avoid narrowing conversion while keeping the datatype flexible via FLOAT macro )
+			constexpr FLOAT f45 {4.5};
+			constexpr FLOAT f15 {1.5};
+			constexpr FLOAT f49 {4./9.};
+			constexpr FLOAT f19 {1./9.};
+			constexpr FLOAT f136 {1./9.};
+			const FLOAT ux_2 {f45 * ux * ux};
+			const FLOAT uy_2 {f45 * uy * uy};
 				// cross terms
 			const FLOAT uymux {uy - ux};
-			const FLOAT uymux_2 {4.5 * uymux * uymux};
+			const FLOAT uymux_2 {f45 * uymux * uymux};
 			const FLOAT uxpuy {ux + uy};
-			const FLOAT uxpuy_2 {4.5 * uxpuy * uxpuy};
-			const FLOAT u_2_times_3_2 {1.5 * (ux * ux + uy * uy)};
+			const FLOAT uxpuy_2 {f45 * uxpuy * uxpuy};
+			const FLOAT u_2_times_3_2 {f15 * (ux * ux + uy * uy)};
 			// weights and density
-			const FLOAT w_4_9  {rho * 4./9.};
-			const FLOAT w_1_9  {rho * 1./9.};
-			const FLOAT w_1_36 {rho * 1./36.};
+			const FLOAT w_4_9  {rho * f49};
+			const FLOAT w_1_9  {rho * f19};
+			const FLOAT w_1_36 {rho * f136};
 
 			// order writes such that changes along the fastest varying index into memory are subsequent
 			// | 6   2   5 |
@@ -189,6 +196,75 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
     buf = temp;
 }
 
+void pull_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
+	Kokkos::parallel_for(
+		"push periodic", 
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}), 
+		KOKKOS_LAMBDA(const UINT x, const UINT y){
+			// ###### STREAM ##################################################
+			// here, stream from neighbours before colliding by "pulling" in surrounding values
+
+			// | 6   2   5 |
+			// |   \ | /   |
+			// | 3 - 0 - 1 |
+			// |   / | \   |
+			// | 7   4   8 |
+			const UINT NX{nx()};
+			const UINT NY{ny()};
+			const FLOAT OMEGA{om()};
+			const UINT xr{(x+1 == NX) ? (0)    : (x+1)};
+			const UINT xl{(x   == 0 ) ? (NX-1) : (x-1)};
+			const UINT yu{(y+1 == NY) ? (0)    : (y+1)};
+			const UINT yd{(y   == 0 ) ? (NY-1) : (y-1)};
+
+			const FLOAT f_7 { VIEW(f,xr,yu, 7) };
+			const FLOAT f_4 { VIEW(f, x,yu, 4) };
+			const FLOAT f_8 { VIEW(f,xl,yu, 8) };
+			const FLOAT f_3 { VIEW(f,xr, y, 3) };
+			const FLOAT f_0 { VIEW(f, x, y, 0) };
+			const FLOAT f_1 { VIEW(f,xl, y, 1) };
+			const FLOAT f_6 { VIEW(f,xr,yd, 6) };
+			const FLOAT f_2 { VIEW(f, x,yd, 2) };
+			const FLOAT f_5 { VIEW(f,xl,yd, 5) };
+			// from here on, the exact same code as in push_periodic
+			const FLOAT rho {f_0 + f_1 + f_2 + f_3 + f_4 + f_5 + f_6 + f_7 + f_8};
+			constexpr FLOAT f1 {1.0};
+			const FLOAT rho_inv {f1/rho};
+		 	const FLOAT ux { (f_1 - f_3 + f_5 - f_6 - f_7 + f_8) * rho_inv};
+			const FLOAT uy {(f_2 - f_4 + f_5 + f_6 - f_7 - f_8) * rho_inv};
+			constexpr FLOAT f45 {4.5};
+			constexpr FLOAT f15 {1.5};
+			constexpr FLOAT f49 {4./9.};
+			constexpr FLOAT f19 {1./9.};
+			constexpr FLOAT f136 {1./9.};
+			const FLOAT ux_2 {f45 * ux * ux};
+			const FLOAT uy_2 {f45 * uy * uy};
+			const FLOAT uymux {uy - ux};
+			const FLOAT uymux_2 {f45 * uymux * uymux};
+			const FLOAT uxpuy {ux + uy};
+			const FLOAT uxpuy_2 {f45 * uxpuy * uxpuy};
+			const FLOAT u_2_times_3_2 {f15 * (ux * ux + uy * uy)};
+			const FLOAT w_4_9  {rho * f49};
+			const FLOAT w_1_9  {rho * f19};
+			const FLOAT w_1_36 {rho * f136};
+			// WRITES ARE NOW COALESCING
+			VIEW(buf, x, y, 7) = f_7 + OMEGA * ((w_1_36 * (1- 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_7);
+			VIEW(buf, x, y, 4) = f_4 + OMEGA * ((w_1_9 * (1- 3*uy+ uy_2- u_2_times_3_2)) - f_4);
+			VIEW(buf, x, y, 8) = f_8 + OMEGA * ((w_1_36 * (1- 3*uymux+ uymux_2- u_2_times_3_2)) - f_8);
+			VIEW(buf, x, y, 3) = f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3);
+			VIEW(buf, x, y, 0) = f_0 + OMEGA * ((w_4_9 * (1- u_2_times_3_2)) - f_0);
+			VIEW(buf, x, y, 1) = f_1 + OMEGA * ((w_1_9 * (1+ 3*ux+ ux_2- u_2_times_3_2)) - f_1);
+			VIEW(buf, x, y, 6) = f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6);
+			VIEW(buf, x, y, 2) = f_2 + OMEGA * ((w_1_9 * (1+ 3*uy+ uy_2- u_2_times_3_2)) - f_2);
+			VIEW(buf, x, y, 5) = f_5 + OMEGA * ((w_1_36 * (1+ 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_5);
+		}
+	);
+	auto temp = f;
+    f = buf;
+    buf = temp;
+}
+
+
 void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_eq, SFL &u_lid){
 	Kokkos::parallel_for(
 		"push interior", 
@@ -212,20 +288,26 @@ void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_e
 			const FLOAT RHO_EQ{rho_eq()};
 			// calculate density and velocity
 			const FLOAT rho { f_0 + f_1 + f_2 + f_3 + f_4 + f_5 + f_6 + f_7 + f_8 };
-			const FLOAT rho_inv {1./rho};
+			constexpr FLOAT f1 {1.0};
+			const FLOAT rho_inv {f1/rho};
 		 	const FLOAT ux { (f_1 - f_3 + f_5 - f_6 - f_7 + f_8) * rho_inv };
 			const FLOAT uy { (f_2 - f_4 + f_5 + f_6 - f_7 - f_8) * rho_inv };
 			// calculate equilibirum values
-			const FLOAT ux_2 {4.5 * ux * ux};
-			const FLOAT uy_2 {4.5 * uy * uy};
+			constexpr FLOAT f45 {4.5};
+			constexpr FLOAT f15 {1.5};
+			constexpr FLOAT f49 {4./9.};
+			constexpr FLOAT f19 {1./9.};
+			constexpr FLOAT f136 {1./9.};
+			const FLOAT ux_2 {f45 * ux * ux};
+			const FLOAT uy_2 {f45 * uy * uy};
 			const FLOAT uymux {uy - ux};
-			const FLOAT uymux_2 {4.5 * uymux * uymux};
+			const FLOAT uymux_2 {f45 * uymux * uymux};
 			const FLOAT uxpuy {ux + uy};
-			const FLOAT uxpuy_2 {4.5 * uxpuy * uxpuy};
-			const FLOAT u_2_times_3_2 {1.5 * (ux * ux + uy * uy)};
-			const FLOAT w_4_9  {rho * 4./9.};
-			const FLOAT w_1_9  {rho * 1./9.};
-			const FLOAT w_1_36 {rho * 1./36.};
+			const FLOAT uxpuy_2 {f45 * uxpuy * uxpuy};
+			const FLOAT u_2_times_3_2 {f15 * (ux * ux + uy * uy)};
+			const FLOAT w_4_9  {rho * f49};
+			const FLOAT w_1_9  {rho * f19};
+			const FLOAT w_1_36 {rho * f136};
 			const FLOAT f_7_eq { f_7 + OMEGA * ((w_1_36 * (1- 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_7) };
 			const FLOAT f_3_eq { f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3) };
 			const FLOAT f_6_eq { f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6) };
@@ -267,7 +349,9 @@ void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_e
 			// for i=8: uw*c_i =  1, total factor -2*( 1)/(1/3)=-6
 			// since w_i = 1/36 either way we get +- 6 w_i ρ = +- 6/36 ρ = 1./6. ρ
 			// const FLOAT df = {-2.0 * (1./36.) * RHO_EQ * (U_LID * (-1.))/(1./3.)};
-			const FLOAT df = { t ? (RHO_EQ * U_LID / 6.) : 0. };  
+			constexpr FLOAT f6 {6.};
+			constexpr FLOAT f0 {0.};
+			const FLOAT df = { t ? (RHO_EQ * U_LID / f6) : f0 };  
 			// stream each channel to the corresponding neighbour node, or the current node if at a boundary
 			VIEW(buf, lb?x:xl, lb?y:yd, lb?5:7) = f_7_eq;
 			VIEW(buf, xl, y , l?1:3) 			= f_3_eq;
@@ -331,7 +415,8 @@ void compute_velocities(Vel_t &vel, Den_t &rho, Dst_t &f){
 			/// 4,7,8 get a minus sign, 0,1,3 don't contribute
 			const FLOAT uy {f_2-f_4+f_5+f_6-f_7-f_8};
 			// multiply with inverse density
-			const FLOAT rho_inv {1./rho(x,y)}; // only divide once!
+			constexpr FLOAT f1 {1.0};
+			const FLOAT rho_inv {f1/rho(x,y)}; // only divide once!
 			// store the results
 			vel(x,y,0) = ux * rho_inv;
 			vel(x,y,1) = uy * rho_inv;
@@ -651,6 +736,7 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 				break;
 			default:
 				push_periodic(f, buf, nx, ny, om); break;
+				// pull_periodic(f, buf, nx, ny, om); break;
 		}
 		// report progress
 		if (OUT_EVERY_N > 0){
