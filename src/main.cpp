@@ -158,7 +158,7 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			constexpr FLOAT f15 {1.5};
 			constexpr FLOAT f49 {4./9.};
 			constexpr FLOAT f19 {1./9.};
-			constexpr FLOAT f136 {1./9.};
+			constexpr FLOAT f136 {1./36.};
 			const FLOAT ux_2 {f45 * ux * ux};
 			const FLOAT uy_2 {f45 * uy * uy};
 				// cross terms
@@ -236,7 +236,7 @@ void pull_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 			constexpr FLOAT f15 {1.5};
 			constexpr FLOAT f49 {4./9.};
 			constexpr FLOAT f19 {1./9.};
-			constexpr FLOAT f136 {1./9.};
+			constexpr FLOAT f136 {1./36.};
 			const FLOAT ux_2 {f45 * ux * ux};
 			const FLOAT uy_2 {f45 * uy * uy};
 			const FLOAT uymux {uy - ux};
@@ -297,7 +297,7 @@ void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_e
 			constexpr FLOAT f15 {1.5};
 			constexpr FLOAT f49 {4./9.};
 			constexpr FLOAT f19 {1./9.};
-			constexpr FLOAT f136 {1./9.};
+			constexpr FLOAT f136 {1./36.};
 			const FLOAT ux_2 {f45 * ux * ux};
 			const FLOAT uy_2 {f45 * uy * uy};
 			const FLOAT uymux {uy - ux};
@@ -728,6 +728,11 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 	}
 
     for (UINT t{0}; t < STEPS; ++t){
+		// write results to std::out
+		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
+			if (!output(vel, rho, f, buf)){ return false; };
+		}
+
 		// do a single fused step of collision and streaming, tailored to the respective boundary conditions of the scene
 		switch (SCENE){
 			case SCENE_TYPE::LID_DRIVEN:
@@ -739,13 +744,9 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 				// pull_periodic(f, buf, nx, ny, om); break;
 		}
 		// report progress
-		if (OUT_EVERY_N > 0){
-			std::cerr << t << " / " << STEPS << "\r";
-		}
-		// write results to std::out
-		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
-			if (!output(vel, rho, f, buf)){ return false; };
-		}
+		// if (OUT_EVERY_N > 0){
+		// 	std::cerr << t << " / " << STEPS << "\r";
+		// }
     };
 
 	return true;

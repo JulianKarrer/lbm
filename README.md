@@ -6,6 +6,8 @@ Setup
 ```
 cmake -S . -B build
 ```
+For the A100 nodes on the BWUniCluster use `cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON` to avoid missing auto-detection of the target architecture. 
+
 Compile 
 ```
 cmake --build build

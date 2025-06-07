@@ -1,0 +1,16 @@
+#!/bin/bash -x
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=00:10:00
+#SBATCH -J KokkosLBM
+#SBATCH --mem=6gb
+#SBATCH --export=ALL
+#SBATCH --partition=multiple
+
+module load compiler/gnu/11.1
+module load mpi/openmpi/4.1
+module load toolkit/nvidia-hpc-sdk/25.1
+
+cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON
+cmake --build build
+./build/main -nx 8192 -ny 8192 -of 0 -s 1000

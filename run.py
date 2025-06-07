@@ -20,6 +20,7 @@ NY = 128
 TOTAL_STEPS = 1000
 DUMP_EVERY = 1
 OMEGA = 1.4
+U_0 = 0.1
 DATA_FILE_NAME = "lid-driven"+str(NX)+"x"+str(NY)+"s"+str(TOTAL_STEPS)+".npy"
 
 # compile the program
@@ -33,9 +34,9 @@ res = subprocess.run([
         "-ny", str(NY),
         "-of", str(DUMP_EVERY),
         "-s", str(TOTAL_STEPS+1),
-        "-ov", # output velocity field
-        "-ld", # lid driven cavity
-        "-u", str(0.1),
+        "-ov", # output velocity magnitudes
+        # "-ld", # lid driven cavity
+        "-u", str(U_0),
         "-rho", str(1.0),
     ], cwd="build",stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,check=False).stdout
 
@@ -49,8 +50,9 @@ for step in res.split("#"):
         ...
 print("number of frames:", len(frames))
 frames = np.array(frames)
-np.save(DATA_FILE_NAME, frames)
+# np.save(DATA_FILE_NAME, frames)
 # frames = np.load(DATA_FILE_NAME)
+print(frames[10])
 
 # setup animation
 nrows, ncols = frames[0].shape
@@ -67,7 +69,7 @@ CBAR_TITLE = r"$\left|\vec{\mathbf{u}}\right|$"
 # Initial contour; levels are fixed then
 fig, ax = plt.subplots()
 fig.set_size_inches(12.8, 10.8, forward=True)
-levels = np.linspace(np.min(frames), np.max(frames), LEVELS)
+levels = np.linspace(0, U_0, LEVELS)
 contour = ax.contourf(X, Y, frames[0], levels=levels, cmap=CMAP)
 cbar = fig.colorbar(contour, ax=ax)
 cbar.set_label(CBAR_TITLE)
@@ -90,12 +92,12 @@ anim = animation.FuncAnimation(
 )
 
 
-# plt.show()
+plt.show()
 
-try:
-    # REQUIRES FFMPEG
-    anim.save('lid-driven-test.mp4', writer='ffmpeg', dpi=100, fps=60)
-except:
-    ...
+# try:
+#     # REQUIRES FFMPEG
+#     anim.save('lid-driven-test.mp4', writer='ffmpeg', dpi=100, fps=60)
+# except:
+#     ...
 
 # print("DONE")
