@@ -15,7 +15,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # set compiler optimization flags  
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -ffast-math -funroll-loops -DNDEBUG" CACHE STRING "Flags for Release build" FORCE)
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG" CACHE STRING "Flags for Release build" FORCE)
 set(CMAKE_CUDA_FLAGS_RELEASE "-O3 --use_fast_math -DNDEBUG" CACHE STRING "Flags for CUDA Release build" FORCE)
 
 # set Kokkos flags
