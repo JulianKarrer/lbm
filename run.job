@@ -7,8 +7,7 @@
 #SBATCH --export=ALL
 #SBATCH --partition=multiple
 
-module load compiler/gnu/11.1
-module load mpi/openmpi/4.1
+module load compiler/gnu mpi/openmpi
 module load toolkit/nvidia-hpc-sdk/25.1
 
 cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON

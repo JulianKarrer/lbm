@@ -70,6 +70,10 @@ FLOAT RHO_INIT{1.0};
 /// @brief initial distribution values
 FLOAT U_INIT{0.1};
 
+/// @brief # Kokkos::MDRange tile group size x-direction
+UINT TX{512};
+/// @brief # Kokkos::MDRange tile group size y-direction
+UINT TY{1};
 
 // FIELD TYPES
 
@@ -107,7 +111,7 @@ using SFL = Kokkos::View<FLOAT>;
 void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 	Kokkos::parallel_for(
 		"push periodic", 
-		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}), 
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 
 			// ###### READ VALUES #############################################
@@ -199,7 +203,7 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 void pull_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 	Kokkos::parallel_for(
 		"push periodic", 
-		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}), 
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// ###### STREAM ##################################################
 			// here, stream from neighbours before colliding by "pulling" in surrounding values
@@ -268,7 +272,7 @@ void pull_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_eq, SFL &u_lid){
 	Kokkos::parallel_for(
 		"push interior", 
-		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}),
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}, {TX, TY}),
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// load the distribution
 			const FLOAT f_0 { VIEW(f, x, y, 0) };
@@ -388,7 +392,7 @@ void compute_densities(Den_t &rho, Dst_t &f){
 void compute_velocities(Vel_t &vel, Den_t &rho, Dst_t &f){
 	Kokkos::parallel_for(
 		"compute velocities", 
-		Kokkos::MDRangePolicy({0, 0}, {NX, NY}), 
+		Kokkos::MDRangePolicy({0, 0}, {NX, NY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// load f_i values into registers to avoid coalescing requirements for multiple accesses
 			// -> note that f_0 is not loaded since it would be weighted with a zero velocity anyways
@@ -462,7 +466,7 @@ FLOAT f_eq(FLOAT ux, FLOAT uy, FLOAT rho_i, UINT dir){
 void init_shearwave(Vel_t &vel, Den_t &rho, Dst_t &f, SUI &ny, SFL &rho_init, SFL &u){
     Kokkos::parallel_for(
 		"initialize", 
-		Kokkos::MDRangePolicy({0, 0}, {NX, NY}), 
+		Kokkos::MDRangePolicy({0, 0}, {NX, NY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// set initial densities
 			const FLOAT rho_i { rho_init() };  // use initial densities
@@ -487,7 +491,7 @@ void init_shearwave(Vel_t &vel, Den_t &rho, Dst_t &f, SUI &ny, SFL &rho_init, SF
 void init_rest(Vel_t &vel, Den_t &rho, Dst_t &f, SFL &rho_init){
     Kokkos::parallel_for(
 		"initialize at rest", 
-		Kokkos::MDRangePolicy({0, 0}, {NX, NY}), 
+		Kokkos::MDRangePolicy({0, 0}, {NX, NY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// set initial densities to specified value
 			const FLOAT rho_i { rho_init() }; 
@@ -616,8 +620,8 @@ void parse_args(int argc, char *argv[]){
 		.store_into(NY);
 	program
 		.add_argument("-of", "--output-frequency")
-		.help("Specify how frequently (as an integer number of timesteps) simulation results should be output")
-		.default_value<UINT>({ 100 })
+		.help("Specify how frequently (as an integer number of timesteps) simulation results should be output. 0 means no output.")
+		.default_value<UINT>({ 0 })
   		.required()
 		.store_into(OUT_EVERY_N);
 	program
@@ -647,6 +651,18 @@ void parse_args(int argc, char *argv[]){
 		.default_value<double>({ 0.1 })
   		.required()
 		.store_into(u_init);
+	program
+		.add_argument("-tx", "--x-grid-points")
+		.help("Specify the kernel tiling size in x-direction for performance optimization")
+		.default_value<UINT>({ 512 })
+  		.required()
+		.store_into(TX);
+	program
+		.add_argument("-ty", "--y-grid-points")
+		.help("Specify the kernel tiling size in y-direction for performance optimization")
+		.default_value<UINT>({ 1 })
+  		.required()
+		.store_into(TY);
 	// mutually exclusive : the type of output
 	auto &output_type = program.add_mutually_exclusive_group();
 	output_type.add_argument("-omv", "--output-max-vel")
@@ -740,8 +756,8 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 				// boundary_correct_lid(f, nx, ny, rho_init, u);
 				break;
 			default:
-				push_periodic(f, buf, nx, ny, om); break;
-				// pull_periodic(f, buf, nx, ny, om); break;
+				// push_periodic(f, buf, nx, ny, om); break;
+				pull_periodic(f, buf, nx, ny, om); break;
 		}
 		// report progress
 		// if (OUT_EVERY_N > 0){

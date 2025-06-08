@@ -29,6 +29,7 @@ set(Kokkos_ENABLE_TESTS       OFF CACHE BOOL "")
 set(Kokkos_ENABLE_EXAMPLES    OFF CACHE BOOL "")
 set(Kokkos_ENABLE_KOKKOSKERNELS ON CACHE BOOL "")
 set(Kokkos_ARCH_NATIVE        ON  CACHE BOOL "")  # auto‐detect
+set(Kokkos_ARCH_AMPERE_80     ON  CACHE BOOL "") 
 set(DKokkos_ENABLE_CUDA_LAMBDA ON  CACHE BOOL "")
 
 set(Kokkos_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/Kokkos)
