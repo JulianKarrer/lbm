@@ -61,4 +61,8 @@ add_executable(
   deps/argparse/argparse.hpp
 )
 
-target_link_libraries(main Kokkos::kokkos)
+# include MPI support
+find_package(MPI REQUIRED)
+
+target_link_libraries(main Kokkos::kokkos MPI::MPI_CXX)
+

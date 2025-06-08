@@ -5,3 +5,4 @@
 /out
 /out2
 *.npy
+*.vscode*

@@ -5,6 +5,7 @@
 #include <chrono>
 #include "argparse/argparse.hpp"
 #include "Kokkos_Core.hpp"
+#include <mpi.h>
 
 
 // TYPES
@@ -13,6 +14,7 @@
 // (e.g. to benchmark double vs. float performance) 
 // without refactoring the entire code
 #define FLOAT float
+#define MFLOAT MPI_FLOAT
 #define SIN sinf
 #define SQRT sqrtf
 #define INT int32_t
@@ -53,9 +55,9 @@ std::ostream* OUT_STREAM{&std::cout};
 std::ofstream OUT_FILE;
 
 /// @brief dump simulation results to std::out every so many timesteps
-UINT OUT_EVERY_N{100};
+UINT OUT_EVERY_N{0};
 /// @brief number of total time steps of the simulation
-UINT STEPS{50000};
+UINT STEPS{100};
 /// @brief # grid points in y-direction
 UINT NY;
 /// @brief # grid points in x-direction
@@ -268,6 +270,66 @@ void pull_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
     buf = temp;
 }
 
+void pull_periodic_mpi(Dst_t& f, Dst_t& buf, SFL &om, UINT LX, UINT LY, UINT HX, UINT HY){
+	Kokkos::parallel_for(
+		"push periodic", 
+		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({LX, LY}, {HX, HY}, {TX, TY}), 
+		KOKKOS_LAMBDA(const UINT x, const UINT y){
+			// in this MPI-version there is a halo region 
+			// so no explicit periodic boundary handling is required
+			const UINT xr{x+1};
+			const UINT xl{x-1};
+			const UINT yu{y+1};
+			const UINT yd{y-1};
+
+			const FLOAT f_7 { VIEW(f,xr,yu, 7) };
+			const FLOAT f_4 { VIEW(f, x,yu, 4) };
+			const FLOAT f_8 { VIEW(f,xl,yu, 8) };
+			const FLOAT f_3 { VIEW(f,xr, y, 3) };
+			const FLOAT f_0 { VIEW(f, x, y, 0) };
+			const FLOAT f_1 { VIEW(f,xl, y, 1) };
+			const FLOAT f_6 { VIEW(f,xr,yd, 6) };
+			const FLOAT f_2 { VIEW(f, x,yd, 2) };
+			const FLOAT f_5 { VIEW(f,xl,yd, 5) };
+			// from here on, the exact same code as in push_periodic
+			const FLOAT rho {f_0 + f_1 + f_2 + f_3 + f_4 + f_5 + f_6 + f_7 + f_8};
+			constexpr FLOAT f1 {1.0};
+			const FLOAT rho_inv {f1/rho};
+		 	const FLOAT ux { (f_1 - f_3 + f_5 - f_6 - f_7 + f_8) * rho_inv};
+			const FLOAT uy {(f_2 - f_4 + f_5 + f_6 - f_7 - f_8) * rho_inv};
+			constexpr FLOAT f45 {4.5};
+			constexpr FLOAT f15 {1.5};
+			constexpr FLOAT f49 {4./9.};
+			constexpr FLOAT f19 {1./9.};
+			constexpr FLOAT f136 {1./36.};
+
+			// interleave required common subexpressions and writes
+			const FLOAT w_1_36 {rho * f136};
+			const FLOAT uxpuy {ux + uy};
+			const FLOAT uxpuy_2 {f45 * uxpuy * uxpuy};
+			const FLOAT u_2_times_3_2 {f15 * (ux * ux + uy * uy)};
+			const FLOAT OMEGA{om()};
+			VIEW(buf, x, y, 7) = f_7 + OMEGA * ((w_1_36 * (1- 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_7);
+			const FLOAT uy_2 {f45 * uy * uy};
+			const FLOAT w_1_9  {rho * f19};
+			VIEW(buf, x, y, 4) = f_4 + OMEGA * ((w_1_9 * (1- 3*uy+ uy_2- u_2_times_3_2)) - f_4);
+			const FLOAT uymux {uy - ux};
+			const FLOAT uymux_2 {f45 * uymux * uymux};
+			VIEW(buf, x, y, 8) = f_8 + OMEGA * ((w_1_36 * (1- 3*uymux+ uymux_2- u_2_times_3_2)) - f_8);
+			const FLOAT ux_2 {f45 * ux * ux};
+			VIEW(buf, x, y, 3) = f_3 + OMEGA * ((w_1_9 * (1- 3*ux+ ux_2- u_2_times_3_2)) - f_3);
+			const FLOAT w_4_9  {rho * f49};
+			VIEW(buf, x, y, 0) = f_0 + OMEGA * ((w_4_9 * (1- u_2_times_3_2)) - f_0);
+			VIEW(buf, x, y, 1) = f_1 + OMEGA * ((w_1_9 * (1+ 3*ux+ ux_2- u_2_times_3_2)) - f_1);
+			VIEW(buf, x, y, 6) = f_6 + OMEGA * ((w_1_36 * (1+ 3*uymux+ uymux_2- u_2_times_3_2)) - f_6);
+			VIEW(buf, x, y, 2) = f_2 + OMEGA * ((w_1_9 * (1+ 3*uy+ uy_2- u_2_times_3_2)) - f_2);
+			VIEW(buf, x, y, 5) = f_5 + OMEGA * ((w_1_36 * (1+ 3*uxpuy+ uxpuy_2- u_2_times_3_2)) - f_5);
+		}
+	);
+	auto temp = f;
+    f = buf;
+    buf = temp;
+}
 
 void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_eq, SFL &u_lid){
 	Kokkos::parallel_for(
@@ -463,10 +525,10 @@ FLOAT f_eq(FLOAT ux, FLOAT uy, FLOAT rho_i, UINT dir){
 	);
 }
 
-void init_shearwave(Vel_t &vel, Den_t &rho, Dst_t &f, SUI &ny, SFL &rho_init, SFL &u){
+void init_shearwave(Vel_t &vel, Den_t &rho, Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, UINT HX, UINT HY, UINT GLY){
     Kokkos::parallel_for(
 		"initialize", 
-		Kokkos::MDRangePolicy({0, 0}, {NX, NY}, {TX, TY}), 
+		Kokkos::MDRangePolicy({LX, LY}, {HX, HY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// set initial densities
 			const FLOAT rho_i { rho_init() };  // use initial densities
@@ -475,7 +537,8 @@ void init_shearwave(Vel_t &vel, Den_t &rho, Dst_t &f, SUI &ny, SFL &rho_init, SF
 			// set initial velocities
 			const UINT NY{ny()};
 			const FLOAT u_init { u() }; 
-			const FLOAT ux{u_init * SIN((2.0*M_PI * ((FLOAT) y)) / ((FLOAT) NY))}; // this implements a shear wave
+			const FLOAT y_scaled { ((FLOAT)(y-GLY))/((FLOAT) NY) }; // scale y to rank-independent, global y
+			const FLOAT ux{u_init * SIN(2.0*M_PI * y_scaled)}; // this implements a shear wave
 			const FLOAT uy{0.};
 			vel(x,y,0) = ux;
 			vel(x,y,1) = uy;
@@ -507,7 +570,8 @@ void init_rest(Vel_t &vel, Den_t &rho, Dst_t &f, SFL &rho_init){
 	);
 }
 
-bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
+
+bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY){
 	// output depending on selected OUTPUT_TYPE
 	switch (OUTPUT)
 	{
@@ -520,7 +584,7 @@ bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
 			FLOAT max_x_vel = -1e30;
 			Kokkos::parallel_reduce(
 				"find max x-velocity",
-				Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {NX, NY}),
+				Kokkos::MDRangePolicy<Kokkos::Rank<2>>({LX, LY}, {HX, HY}),
 				KOKKOS_LAMBDA(const int i, const int j, FLOAT& local_max) {
 					const FLOAT ux = vel(i, j, 0);
 					const FLOAT uy = vel(i, j, 1);
@@ -603,6 +667,10 @@ bool output(Vel_t &vel, Den_t &rho, Dst_t &f, Dst_t &buf){
 	return true;
 }
 
+/// @brief Parse command line arguments, storing values into the corresponding global variables on the host-side.
+/// Arguments used on the device-side must be moved into buffers subsequently.
+/// @param argc argument count
+/// @param argv argument char pointer
 void parse_args(int argc, char *argv[]){
 // define arguments to parse
 	argparse::ArgumentParser program("lbm");
@@ -612,12 +680,16 @@ void parse_args(int argc, char *argv[]){
 		.default_value<UINT>({ 1024 })
   		.required()
 		.store_into(NX);
+		// add to NX to account for halo
+		NX += 2;
 	program
 		.add_argument("-ny", "--y-grid-points")
 		.help("Specify the number of grid points in the y-direction")
 		.default_value<UINT>({ 1024 })
   		.required()
 		.store_into(NY);
+		// add to NY to account for halo
+		NX += 2;
 	program
 		.add_argument("-of", "--output-frequency")
 		.help("Specify how frequently (as an integer number of timesteps) simulation results should be output. 0 means no output.")
@@ -727,7 +799,7 @@ void parse_args(int argc, char *argv[]){
 	}
 }
 
-bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
+bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
     Den_t rho("rho", NX, NY);
     Vel_t vel("vel", NX, NY);
 	Dst_t f  ("f"  , Q, NY, NX);
@@ -740,13 +812,83 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 			// init_shearwave(vel, rho, f, ny, rho_init, u); break;
 			init_rest(vel, rho, f, rho_init); break;
 		default:
-			init_shearwave(vel, rho, f, ny, rho_init, u); break;
+			init_shearwave(vel, rho, f, ny, rho_init, u, 1, NX-1, 1, NY-1, 1); break;
 	}
 
+	// create MPI datatypes for communication
+	// https://en.cs.uni-paderborn.de/fileadmin-eim/informatik/fg/hpc/teaching/WS1718/HPC/HPC-07-Advanced-MPI.pdf
+	auto subarray_y = [&](int start_x){
+		MPI_Datatype data_type;
+		const int buf_shape[3] {(int)Q, (int)NY, (int)NX}; // total buffer shape
+		const int slc_shape[3] {(int)Q, (int)NY, 1};// shape of the slices sent/received
+		const int srt_indxs[3] {0, 0, start_x}; // starting indices of this slice
+		MPI_Type_create_subarray(
+			3, // dimensions
+			buf_shape, 
+			slc_shape, 
+			srt_indxs,
+			MPI_ORDER_C, // memory layout, here: row major
+			MFLOAT, // content datatype
+			&data_type // datatype to create
+		);
+		// commit the datatype
+		MPI_Type_commit(&data_type);
+		return data_type;
+	};
+	auto subarray_x = [&](int start_y){
+		MPI_Datatype data_type;
+		const int buf_shape[3] {(int)Q, (int)NY, (int)NX}; // total buffer shape
+		const int slc_shape[3] {(int)Q, (int)1, (int)NX}; // shape of the slices sent/received
+		const int srt_indxs[3] {0, start_y, 0}; // starting indices of this slice
+		MPI_Type_create_subarray(
+			3, // dimensions
+			buf_shape, 
+			slc_shape, 
+			srt_indxs,
+			MPI_ORDER_C, // memory layout, here: row major
+			MFLOAT, // content datatype
+			&data_type // datatype to create
+		);
+		// commit the datatype
+		MPI_Type_commit(&data_type);
+		return data_type;
+	};
+	MPI_Datatype send_left {subarray_y(1)};
+	MPI_Datatype recv_left {subarray_y(0)};
+	MPI_Datatype send_right{subarray_y(NX-2)};
+	MPI_Datatype recv_right{subarray_y(NX-1)};
+	MPI_Datatype send_bot {subarray_x(1)};
+	MPI_Datatype recv_bot {subarray_x(0)};
+	MPI_Datatype send_top {subarray_x(NY-2)};
+	MPI_Datatype recv_top {subarray_x(NY-1)};
+	const int TAG_L {0};
+	const int TAG_R {1};
+	const int TAG_B {2};
+	const int TAG_T {3};
+
     for (UINT t{0}; t < STEPS; ++t){
+		// communicate halo:
+		// TODO: use not own but corresponding neighbours' rank
+		// receive and send halo slices asynchronously, collecting the request receipts
+		MPI_Request reqs[8];
+		void *f_ptr = f.data();
+		// left and right halo
+		MPI_Irecv(f_ptr, 1, recv_left, rank, TAG_L, MPI_COMM_WORLD, &reqs[0]);
+		MPI_Isend(f_ptr, 1, send_right, rank, TAG_L, MPI_COMM_WORLD, &reqs[1]);
+		MPI_Irecv(f_ptr, 1, recv_right, rank, TAG_R, MPI_COMM_WORLD, &reqs[2]);
+		MPI_Isend(f_ptr, 1, send_left, rank, TAG_R, MPI_COMM_WORLD, &reqs[3]);
+		// upper and lower halo
+		MPI_Irecv(f_ptr, 1, recv_bot, rank, TAG_B, MPI_COMM_WORLD, &reqs[4]);
+		MPI_Isend(f_ptr, 1, send_top, rank, TAG_B, MPI_COMM_WORLD, &reqs[5]);
+		MPI_Irecv(f_ptr, 1, recv_top, rank, TAG_T, MPI_COMM_WORLD, &reqs[6]);
+		MPI_Isend(f_ptr, 1, send_bot, rank, TAG_T, MPI_COMM_WORLD, &reqs[7]);
+		// wait for sending to finish
+		MPI_Waitall(8, reqs, MPI_SUCCESS);
+		
+
 		// write results to std::out
 		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
-			if (!output(vel, rho, f, buf)){ return false; };
+			if (!output(vel, rho, f, buf, 1, 1, NX-1, NY-1)){ return false; };
 		}
 
 		// do a single fused step of collision and streaming, tailored to the respective boundary conditions of the scene
@@ -757,7 +899,7 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 				break;
 			default:
 				// push_periodic(f, buf, nx, ny, om); break;
-				pull_periodic(f, buf, nx, ny, om); break;
+				pull_periodic_mpi(f, buf, om, 1, 1, NX-1, NY-1); break;
 		}
 		// report progress
 		// if (OUT_EVERY_N > 0){
@@ -765,6 +907,11 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 		// }
     };
 
+	// free up the previously committed MPI datatypes
+	MPI_Type_free(&send_left);
+	MPI_Type_free(&recv_left);
+	MPI_Type_free(&send_right);
+	MPI_Type_free(&recv_right);
 	return true;
 }
 
@@ -772,13 +919,20 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 // MAIN ENTRY POINT
 
 int main(int argc, char *argv[]) {
+    MPI_Init(&argc, &argv);
 	// parse command line arguments to adjust NX, NY, OMEGA, ...
 	parse_args(argc, argv);
 	// Initialize Kokkos 
     Kokkos::initialize(argc, argv);
 	// Kokkos::print_configuration(std::cout);
+
+	int size, rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
+	std::cout << "rank = " << rank << "/" << size << std::endl;
+
 	// new scope to make sure deallocation precedes finalize()
-	bool success = false;
+	bool success {true};
 	{
 		// make args visible on device-side
 		SUI nx("NX");
@@ -804,7 +958,7 @@ int main(int argc, char *argv[]) {
 
 		// Run the simulation
 		auto start {std::chrono::high_resolution_clock::now()};
-		success = run_simulation(nx, ny, om, rho, u);
+		success = run_simulation(nx, ny, om, rho, u, rank);
 		auto end {std::chrono::high_resolution_clock::now()};
 		// print the MLUPS count
 		auto span {std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()};
@@ -817,5 +971,6 @@ int main(int argc, char *argv[]) {
 	}
 	(*OUT_STREAM) << std::flush;
     Kokkos::finalize();
+    MPI_Finalize();
     return success ? 0 : 1;
 }
