@@ -79,21 +79,23 @@ UINT TY{1};
 
 // FIELD TYPES
 
-/// Field of density values (x,y)
+/// @brief Field of density values (x,y)
 using Den_t = Kokkos::View<FLOAT**, Kokkos::LayoutRight>;
 
-/// Field of velocity values (dir,x,y)
+/// @brief Field of velocity values (dir,x,y)
 using Vel_t = Kokkos::View<FLOAT**[2], Kokkos::LayoutRight>;
 
-/// Host-side field of velocity values (dir,x,y)
+/// @brief Host-side field of velocity values (dir,x,y)
 using Vel_t_host = Kokkos::View<FLOAT**[2], Kokkos::LayoutRight, Kokkos::HostSpace::device_type, Kokkos::Experimental::DefaultViewHooks>;
 
-/// Field of distribution values
+/// @brief Field of distribution values
 using Dst_t = Kokkos::View<FLOAT***, Kokkos::LayoutRight>; // Q Y X
 
-/// Field of coordinates of bounce-back, no-slip walls
+/// @brief Field of coordinates of bounce-back, no-slip walls
 using Bdy_t = Kokkos::View<UINT*[2], Kokkos::LayoutRight>;
 
+/// @brief Field of packed, contiguous floats for MPI communication of halo regions
+using Hlo_t = Kokkos::View<FLOAT*, Kokkos::LayoutRight>;
 
 /// @brief A scalar, unsigned int
 using SUI = Kokkos::View<UINT>;
@@ -804,6 +806,16 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
     Vel_t vel("vel", NX, NY);
 	Dst_t f  ("f"  , Q, NY, NX);
     Dst_t buf("buf", Q, NY, NX);
+	// prepare MPI buffers, tags and request array
+	Hlo_t top_buf("top halo buffer", NX*3);
+	Hlo_t bot_buf("bot halo buffer", NX*3);
+	Hlo_t lft_buf("left halo buffer", NY*3);
+	Hlo_t rgt_buf("right halo buffer", NY*3);
+	const int TAG_L {0};
+	const int TAG_R {1};
+	const int TAG_B {2};
+	const int TAG_T {3};
+	MPI_Request reqs[4];
 
 	// initialize quantities
 	// (buf need not be initialized since it is written to everywhere)
@@ -815,76 +827,94 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 			init_shearwave(vel, rho, f, ny, rho_init, u, 1, NX-1, 1, NY-1, 1); break;
 	}
 
-	// create MPI datatypes for communication
-	// https://en.cs.uni-paderborn.de/fileadmin-eim/informatik/fg/hpc/teaching/WS1718/HPC/HPC-07-Advanced-MPI.pdf
-	auto subarray_y = [&](int start_x){
-		MPI_Datatype data_type;
-		const int buf_shape[3] {(int)Q, (int)NY, (int)NX}; // total buffer shape
-		const int slc_shape[3] {(int)Q, (int)NY, 1};// shape of the slices sent/received
-		const int srt_indxs[3] {0, 0, start_x}; // starting indices of this slice
-		MPI_Type_create_subarray(
-			3, // dimensions
-			buf_shape, 
-			slc_shape, 
-			srt_indxs,
-			MPI_ORDER_C, // memory layout, here: row major
-			MFLOAT, // content datatype
-			&data_type // datatype to create
-		);
-		// commit the datatype
-		MPI_Type_commit(&data_type);
-		return data_type;
-	};
-	auto subarray_x = [&](int start_y){
-		MPI_Datatype data_type;
-		const int buf_shape[3] {(int)Q, (int)NY, (int)NX}; // total buffer shape
-		const int slc_shape[3] {(int)Q, (int)1, (int)NX}; // shape of the slices sent/received
-		const int srt_indxs[3] {0, start_y, 0}; // starting indices of this slice
-		MPI_Type_create_subarray(
-			3, // dimensions
-			buf_shape, 
-			slc_shape, 
-			srt_indxs,
-			MPI_ORDER_C, // memory layout, here: row major
-			MFLOAT, // content datatype
-			&data_type // datatype to create
-		);
-		// commit the datatype
-		MPI_Type_commit(&data_type);
-		return data_type;
-	};
-	MPI_Datatype send_left {subarray_y(1)};
-	MPI_Datatype recv_left {subarray_y(0)};
-	MPI_Datatype send_right{subarray_y(NX-2)};
-	MPI_Datatype recv_right{subarray_y(NX-1)};
-	MPI_Datatype send_bot {subarray_x(1)};
-	MPI_Datatype recv_bot {subarray_x(0)};
-	MPI_Datatype send_top {subarray_x(NY-2)};
-	MPI_Datatype recv_top {subarray_x(NY-1)};
-	const int TAG_L {0};
-	const int TAG_R {1};
-	const int TAG_B {2};
-	const int TAG_T {3};
-
+	// main simulation loop
     for (UINT t{0}; t < STEPS; ++t){
 		// communicate halo:
 		// TODO: use not own but corresponding neighbours' rank
 		// receive and send halo slices asynchronously, collecting the request receipts
-		MPI_Request reqs[8];
-		void *f_ptr = f.data();
-		// left and right halo
-		MPI_Irecv(f_ptr, 1, recv_left, rank, TAG_L, MPI_COMM_WORLD, &reqs[0]);
-		MPI_Isend(f_ptr, 1, send_right, rank, TAG_L, MPI_COMM_WORLD, &reqs[1]);
-		MPI_Irecv(f_ptr, 1, recv_right, rank, TAG_R, MPI_COMM_WORLD, &reqs[2]);
-		MPI_Isend(f_ptr, 1, send_left, rank, TAG_R, MPI_COMM_WORLD, &reqs[3]);
-		// upper and lower halo
-		MPI_Irecv(f_ptr, 1, recv_bot, rank, TAG_B, MPI_COMM_WORLD, &reqs[4]);
-		MPI_Isend(f_ptr, 1, send_top, rank, TAG_B, MPI_COMM_WORLD, &reqs[5]);
-		MPI_Irecv(f_ptr, 1, recv_top, rank, TAG_T, MPI_COMM_WORLD, &reqs[6]);
-		MPI_Isend(f_ptr, 1, send_bot, rank, TAG_T, MPI_COMM_WORLD, &reqs[7]);
-		// wait for sending to finish
-		MPI_Waitall(8, reqs, MPI_SUCCESS);
-		
+		// https://www.osti.gov/servlets/purl/1818024
+		// 1. post receives
+		MPI_Irecv(static_cast<void*>(top_buf.data()), 3*NX, MFLOAT, rank, TAG_B, MPI_COMM_WORLD, &reqs[0]);
+		MPI_Irecv(static_cast<void*>(bot_buf.data()), 3*NX, MFLOAT, rank, TAG_T, MPI_COMM_WORLD, &reqs[1]);
+		// 2. pack buffers 
+		// | 6   2   5 |
+		// |   \ | /   |
+		// | 3 - 0 - 1 |
+		// |   / | \   |
+		// | 7   4   8 |
+			// top: y=NY-2
+		Kokkos::parallel_for("pack top buf", NX, KOKKOS_LAMBDA(const UINT x){
+				const UINT y{ny() - 2};
+				top_buf(3*x  ) = VIEW(f, x, y, 6);
+				top_buf(3*x+1) = VIEW(f, x, y, 2);
+				top_buf(3*x+1) = VIEW(f, x, y, 5);
+			}
+		);
+			// bot: y=1
+		Kokkos::parallel_for("pack bot buf", NX, KOKKOS_LAMBDA(const UINT x){
+				bot_buf(3*x  ) = VIEW(f, x, 1, 7);
+				bot_buf(3*x+1) = VIEW(f, x, 1, 4);
+				bot_buf(3*x+1) = VIEW(f, x, 1, 8);
+			}
+		);
+		// 3. post sends
+		MPI_Isend(static_cast<void*>(top_buf.data()), 3*NX, MFLOAT, rank, TAG_T, MPI_COMM_WORLD, &reqs[4]);
+		MPI_Isend(static_cast<void*>(bot_buf.data()), 3*NX, MFLOAT, rank, TAG_B, MPI_COMM_WORLD, &reqs[5]);
+		// 4. wait on completion
+		MPI_Waitall(4, reqs, MPI_STATUS_IGNORE);
+		// 5. unpack buffers
+			// top: y=NY-1
+		Kokkos::parallel_for("pack top buf", NX, KOKKOS_LAMBDA(const UINT x){
+				const UINT y{ny() - 1};
+				VIEW(f, x, y, 7) = top_buf(3*x  );
+				VIEW(f, x, y, 4) = top_buf(3*x+1);
+				VIEW(f, x, y, 8) = top_buf(3*x+1);
+			}
+		);
+			// bot: y=0
+		Kokkos::parallel_for("pack bot buf", NX, KOKKOS_LAMBDA(const UINT x){
+				VIEW(f, x, 0, 6) = bot_buf(3*x  );
+				VIEW(f, x, 0, 2) = bot_buf(3*x+1);
+				VIEW(f, x, 0, 5) = bot_buf(3*x+1);
+			}
+		);
+		// same procedure with left and right halo
+		MPI_Irecv(static_cast<void*>(lft_buf.data()), 3*NY, MFLOAT, rank, TAG_R, MPI_COMM_WORLD, &reqs[0]);
+		MPI_Irecv(static_cast<void*>(rgt_buf.data()), 3*NY, MFLOAT, rank, TAG_L, MPI_COMM_WORLD, &reqs[1]);
+			// left: x=1
+		Kokkos::parallel_for("pack lft buf", NY, KOKKOS_LAMBDA(const UINT y){
+				lft_buf(3*y  ) = VIEW(f, 1, y, 7);
+				lft_buf(3*y+1) = VIEW(f, 1, y, 3);
+				lft_buf(3*y+1) = VIEW(f, 1, y, 6);
+			}
+		);
+			// right: x=NX-2
+		Kokkos::parallel_for("pack lft buf", NY, KOKKOS_LAMBDA(const UINT y){
+				const UINT x{nx() - 2};
+				rgt_buf(3*y  ) = VIEW(f, x, y, 8);
+				rgt_buf(3*y+1) = VIEW(f, x, y, 1);
+				rgt_buf(3*y+1) = VIEW(f, x, y, 5);
+			}
+		);
+		MPI_Isend(static_cast<void*>(lft_buf.data()), 3*NY, MFLOAT, rank, TAG_L, MPI_COMM_WORLD, &reqs[2]);
+		MPI_Isend(static_cast<void*>(rgt_buf.data()), 3*NY, MFLOAT, rank, TAG_R, MPI_COMM_WORLD, &reqs[3]);
+		MPI_Waitall(4, reqs, MPI_STATUS_IGNORE);
+			// left: x=0
+		Kokkos::parallel_for("pack lft buf", NY, KOKKOS_LAMBDA(const UINT y){
+				VIEW(f, 0, y, 8) = lft_buf(3*y  );
+				VIEW(f, 0, y, 1) = lft_buf(3*y+1);
+				VIEW(f, 0, y, 5) = lft_buf(3*y+1);
+			}
+		);
+			// right: x=NX-1
+		Kokkos::parallel_for("pack lft buf", NY, KOKKOS_LAMBDA(const UINT y){
+				const UINT x{nx() - 1};
+				VIEW(f, x, y, 7) = rgt_buf(3*y  );
+				VIEW(f, x, y, 3) = rgt_buf(3*y+1);
+				VIEW(f, x, y, 6) = rgt_buf(3*y+1);
+			}
+		);
+
 
 		// write results to std::out
 		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
@@ -907,11 +937,6 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 		// }
     };
 
-	// free up the previously committed MPI datatypes
-	MPI_Type_free(&send_left);
-	MPI_Type_free(&recv_left);
-	MPI_Type_free(&send_right);
-	MPI_Type_free(&recv_right);
 	return true;
 }
 
