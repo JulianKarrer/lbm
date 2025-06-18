@@ -55,13 +55,12 @@ frames = np.array(frames)
 print(frames[10])
 
 # setup animation
-nrows, ncols = frames[0].shape
-x = np.arange(ncols)
-y = np.arange(nrows)
+x = np.arange(NX)
+y = np.arange(NY)
 X, Y = np.meshgrid(x, y)
 
 # settings
-TITLE = str(nrows)+"x"+str(ncols)+' LB-2DQ9-PBC Shear Wave Decay ('+str(DUMP_EVERY*len(frames))+" steps)"
+TITLE = str(NX)+"x"+str(NY)+' LB-2DQ9-PBC Shear Wave Decay ('+str(DUMP_EVERY*len(frames))+" steps)"
 CMAP = "Spectral_r"
 LEVELS = 200
 CBAR_TITLE = r"$\left|\vec{\mathbf{u}}\right|$"

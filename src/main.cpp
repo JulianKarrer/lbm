@@ -333,6 +333,44 @@ void pull_periodic_mpi(Dst_t& f, Dst_t& buf, SFL &om, UINT LX, UINT LY, UINT HX,
     buf = temp;
 }
 
+/// executes kernels that emulate what MPI is supposed to do, but only for the current node
+void correct_halo_periodic(SUI &nx, SUI &ny, Dst_t &f){
+	Kokkos::parallel_for("top/bot exchange", NX-2, KOKKOS_LAMBDA(const UINT x){
+		// top: y=NY-2 -> bot: y=0
+		const UINT NY{ny()};
+		VIEW(f, x+1, 0, 6) = VIEW(f, x+1, NY-2, 6);
+		VIEW(f, x+1, 0, 2) = VIEW(f, x+1, NY-2, 2);
+		VIEW(f, x+1, 0, 5) = VIEW(f, x+1, NY-2, 5);
+		// bot: y=1 -> top: y=NY-1
+		VIEW(f, x+1, NY-1, 7) = VIEW(f, x+1, 1, 7);
+		VIEW(f, x+1, NY-1, 4) = VIEW(f, x+1, 1, 4);
+		VIEW(f, x+1, NY-1, 8) = VIEW(f, x+1, 1, 8);
+	});
+	Kokkos::parallel_for("lft/rgt exchange", NY-2, KOKKOS_LAMBDA(const UINT y){
+		const UINT NX{nx()};
+		// left: x=1 ->  right: x=NX-1
+		VIEW(f, NX-1, y+1, 7) = VIEW(f, 1, y+1, 7);
+		VIEW(f, NX-1, y+1, 3) = VIEW(f, 1, y+1, 3);
+		VIEW(f, NX-1, y+1, 6) = VIEW(f, 1, y+1, 6);
+		// right: x=NX-2 ->  left: x=0
+		VIEW(f, 0, y+1, 8) = VIEW(f, NX-2, y+1, 8);
+		VIEW(f, 0, y+1, 1) = VIEW(f, NX-2, y+1, 1);
+		VIEW(f, 0, y+1, 5) = VIEW(f, NX-2, y+1, 5);
+	});
+	Kokkos::parallel_for("corner exchange", 1, KOKKOS_LAMBDA(const UINT i){
+		const UINT NX{nx()};
+		const UINT NY{ny()};
+		// lt -> rb
+		VIEW(f, NX-1, 0, 6) = VIEW(f, 1, NY-2, 6);
+		// rt -> lb
+		VIEW(f, 0, 0, 5) = VIEW(f, NX-2, NY-2, 5);
+		// lb -> rt
+		VIEW(f, NX-1, NY-1, 7) = VIEW(f, 1, 1, 7);
+		// rb -> lt
+		VIEW(f, 0, NY-1, 8) = VIEW(f, NX-2, 1, 8);
+	});
+}
+
 void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_eq, SFL &u_lid){
 	Kokkos::parallel_for(
 		"push interior", 
@@ -521,7 +559,7 @@ void init_shearwave(Vel_t &vel, Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT L
 			// set initial velocities
 			const UINT NY{ny()};
 			const FLOAT u_init { u() }; 
-			const FLOAT y_scaled { ((FLOAT)(y-GLY))/((FLOAT) (NY-2)) }; // scale y to rank-independent, global y
+			const FLOAT y_scaled { ((FLOAT)(y-1))/((FLOAT) (NY-2)) }; // scale y to rank-independent, global y
 			const FLOAT ux{u_init * SIN(2.0*M_PI * y_scaled)}; // this implements a shear wave
 			const FLOAT uy{0.};
 			vel(x,y,0) = ux;
@@ -660,16 +698,12 @@ void parse_args(int argc, char *argv[]){
 		.default_value<UINT>({ 1024 })
   		.required()
 		.store_into(NX);
-		// add to NX to account for halo
-		NX += 2;
 	program
 		.add_argument("-ny", "--y-grid-points")
 		.help("Specify the number of grid points in the y-direction")
 		.default_value<UINT>({ 1024 })
   		.required()
 		.store_into(NY);
-		// add to NY to account for halo
-		NX += 2;
 	program
 		.add_argument("-of", "--output-frequency")
 		.help("Specify how frequently (as an integer number of timesteps) simulation results should be output. 0 means no output.")
@@ -777,6 +811,10 @@ void parse_args(int argc, char *argv[]){
 	} else {
 		SCENE = SCENE_TYPE::SHEAR_WAVE;
 	}
+	
+	// add to NX,NY to account for halo
+	NX += 2;
+	NY += 2;
 }
 
 bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
@@ -788,18 +826,28 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 	Hlo_t bot_buf("bot halo buffer", (NX-2)*3);
 	Hlo_t lft_buf("left halo buffer", (NY-2)*3);
 	Hlo_t rgt_buf("right halo buffer", (NY-2)*3);
-	auto top_buf_h = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, top_buf);
-	auto bot_buf_h = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, bot_buf);
-	auto lft_buf_h = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lft_buf);
-	auto rgt_buf_h = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rgt_buf);
 	SFL lt("LT corner");
 	SFL rt("RT corner");
 	SFL lb("LB corner");
 	SFL rb("RB corner");
-	auto lt_h = Kokkos::create_mirror_view(lt);
-	auto rt_h = Kokkos::create_mirror_view(rt);
-	auto lb_h = Kokkos::create_mirror_view(lb);
-	auto rb_h = Kokkos::create_mirror_view(rb);
+	// use seperate buffers for sending and receiving on the host side to avoid race conditions and overwrites
+	auto top_buf_send = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, top_buf);
+	auto bot_buf_send = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, bot_buf);
+	auto lft_buf_send = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lft_buf);
+	auto rgt_buf_send = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rgt_buf);
+	auto lt_send      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lt);
+	auto rt_send      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rt);
+	auto lb_send      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lb);
+	auto rb_send      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rb);
+
+	auto top_buf_recv = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, top_buf);
+	auto bot_buf_recv = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, bot_buf);
+	auto lft_buf_recv = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lft_buf);
+	auto rgt_buf_recv = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rgt_buf);
+	auto lt_recv      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lt);
+	auto rt_recv      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rt);
+	auto lb_recv      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, lb);
+	auto rb_recv      = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, rb);
 
 	const int TAG_L_TO_R {0};
 	const int TAG_R_TO_L {1};
@@ -809,7 +857,7 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 	const int TAG_RT_TO_LB {5};
 	const int TAG_LB_TO_RT {6};
 	const int TAG_RB_TO_LT {7};
-	MPI_Request reqs[8];
+	MPI_Request reqs[16];
 
 	// initialize quantities
 	// (buf need not be initialized since it is written to everywhere)
@@ -831,144 +879,134 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 		// TODO: use not own but corresponding neighbours' rank
 		// receive and send halo slices asynchronously, collecting the request receipts
 		// https://www.osti.gov/servlets/purl/1818024
-		// 1. post receives
-		MPI_Irecv(static_cast<void*>(top_buf_h.data()), 3*(NX-2), MFLOAT, rank, TAG_B_TO_T, MPI_COMM_WORLD, &reqs[0]);
-		MPI_Irecv(static_cast<void*>(bot_buf_h.data()), 3*(NX-2), MFLOAT, rank, TAG_T_TO_B, MPI_COMM_WORLD, &reqs[1]);
-		MPI_Irecv(static_cast<void*>(lft_buf_h.data()), 3*(NY-2), MFLOAT, rank, TAG_R_TO_L, MPI_COMM_WORLD, &reqs[2]);
-		MPI_Irecv(static_cast<void*>(rgt_buf_h.data()), 3*(NY-2), MFLOAT, rank, TAG_L_TO_R, MPI_COMM_WORLD, &reqs[3]);
-		// 2. pack buffers 
-		// | 6   2   5 |
-		// |   \ | /   |
-		// | 3 - 0 - 1 |
-		// |   / | \   |
-		// | 7   4   8 |
-		Kokkos::parallel_for("pack top/bot halo buffer", NX-2, KOKKOS_LAMBDA(const UINT x){
-				// top: y=NY-2
-				const UINT y{ny() - 2};
-				top_buf(3*x  ) = VIEW(f, x+1, y, 6);
-				top_buf(3*x+1) = VIEW(f, x+1, y, 2);
-				top_buf(3*x+2) = VIEW(f, x+1, y, 5);
-				// bot: y=1
-				bot_buf(3*x  ) = VIEW(f, x+1, 1, 7);
-				bot_buf(3*x+1) = VIEW(f, x+1, 1, 4);
-				bot_buf(3*x+2) = VIEW(f, x+1, 1, 8);
-			}
-		);
-		Kokkos::parallel_for("pack lft/rgt halo buffer", NY-2, KOKKOS_LAMBDA(const UINT y){
-				// left: x=1
-				lft_buf(3*y  ) = VIEW(f, 1, y+1, 7);
-				lft_buf(3*y+1) = VIEW(f, 1, y+1, 3);
-				lft_buf(3*y+2) = VIEW(f, 1, y+1, 6);
-				// right: x=NX-2
-				const UINT x{nx() - 2};
-				rgt_buf(3*y  ) = VIEW(f, x, y+1, 8);
-				rgt_buf(3*y+1) = VIEW(f, x, y+1, 1);
-				rgt_buf(3*y+2) = VIEW(f, x, y+1, 5);
-			}
-		);
+
+
+		// STEP 1: POST RECEIVES
+		MPI_Irecv(static_cast<void*>(top_buf_recv.data()), top_buf_recv.size(), MFLOAT, rank, TAG_B_TO_T  , MPI_COMM_WORLD, &reqs[ 0]);
+		MPI_Irecv(static_cast<void*>(bot_buf_recv.data()), bot_buf_recv.size(), MFLOAT, rank, TAG_T_TO_B  , MPI_COMM_WORLD, &reqs[ 1]);
+		MPI_Irecv(static_cast<void*>(lft_buf_recv.data()), lft_buf_recv.size(), MFLOAT, rank, TAG_R_TO_L  , MPI_COMM_WORLD, &reqs[ 2]);
+		MPI_Irecv(static_cast<void*>(rgt_buf_recv.data()), rgt_buf_recv.size(), MFLOAT, rank, TAG_L_TO_R  , MPI_COMM_WORLD, &reqs[ 3]);
+		MPI_Irecv(static_cast<void*>(lt_recv.data())     , lt_recv.size()     , MFLOAT, rank, TAG_RB_TO_LT, MPI_COMM_WORLD, &reqs[ 4]);
+		MPI_Irecv(static_cast<void*>(rt_recv.data())     , rt_recv.size()     , MFLOAT, rank, TAG_LB_TO_RT, MPI_COMM_WORLD, &reqs[ 5]);
+		MPI_Irecv(static_cast<void*>(lb_recv.data())     , lb_recv.size()     , MFLOAT, rank, TAG_RT_TO_LB, MPI_COMM_WORLD, &reqs[ 6]);
+		MPI_Irecv(static_cast<void*>(rb_recv.data())     , rb_recv.size()     , MFLOAT, rank, TAG_LT_TO_RB, MPI_COMM_WORLD, &reqs[ 7]);
+
+		// STEP 2: PACKING
+		// 		| 6   2   5 |
+		// 		|   \ | /   |
+		// 		| 3 - 0 - 1 |
+		// 		|   / | \   |
+		// 		| 7   4   8 |
+		Kokkos::parallel_for("top/bot packing", NX-2, KOKKOS_LAMBDA(const UINT x){
+			// top: y=NY-2 -> bot: y=0
+			const UINT NY{ny()};
+			const UINT OFF{nx()-2};
+			top_buf(x      ) = VIEW(f, x+1, NY-2, 6);
+			top_buf(x+  OFF) = VIEW(f, x+1, NY-2, 2);
+			top_buf(x+2*OFF) = VIEW(f, x+1, NY-2, 5);
+			// bot: y=1 -> top: y=NY-1
+			bot_buf(x      ) = VIEW(f, x+1, 1, 7);
+			bot_buf(x+  OFF) = VIEW(f, x+1, 1, 4);
+			bot_buf(x+2*OFF) = VIEW(f, x+1, 1, 8);
+		});
+		Kokkos::parallel_for("lft/rgt packing", NY-2, KOKKOS_LAMBDA(const UINT y){
+			const UINT NX{nx()};
+			const UINT OFF{ny()-2};
+			// left: x=1 ->  right: x=NX-1
+			lft_buf(y      ) = VIEW(f, 1, y+1, 7);
+			lft_buf(y+  OFF) = VIEW(f, 1, y+1, 3);
+			lft_buf(y+2*OFF) = VIEW(f, 1, y+1, 6);
+			// right: x=NX-2 ->  left: x=0
+			rgt_buf(y      ) = VIEW(f, NX-2, y+1, 8);
+			rgt_buf(y+  OFF) = VIEW(f, NX-2, y+1, 1);
+			rgt_buf(y+2*OFF) = VIEW(f, NX-2, y+1, 5);
+		});
+		Kokkos::parallel_for("corner exchange", 1, KOKKOS_LAMBDA(const UINT i){
+			const UINT NX{nx()};
+			const UINT NY{ny()};
+			// lt -> rb
+			lt() = VIEW(f, 1, NY-2, 6);
+			// rt -> lb
+			rt() = VIEW(f, NX-2, NY-2, 5);
+			// lb -> rt
+			lb() = VIEW(f, 1, 1, 7);
+			// rb -> lt
+			rb() = VIEW(f, NX-2, 1, 8);
+		});
 		Kokkos::fence();
-		Kokkos::deep_copy(top_buf_h, top_buf);
-		Kokkos::deep_copy(bot_buf_h, bot_buf);
-		Kokkos::deep_copy(lft_buf_h, lft_buf);
-		Kokkos::deep_copy(rgt_buf_h, rgt_buf);
-		Kokkos::fence();
-		// 3. post sends
-		MPI_Isend(static_cast<void*>(bot_buf_h.data()), 3*(NX-2), MFLOAT, rank, TAG_B_TO_T, MPI_COMM_WORLD, &reqs[4]);
-		MPI_Isend(static_cast<void*>(top_buf_h.data()), 3*(NX-2), MFLOAT, rank, TAG_T_TO_B, MPI_COMM_WORLD, &reqs[5]);
-		MPI_Isend(static_cast<void*>(lft_buf_h.data()), 3*(NY-2), MFLOAT, rank, TAG_L_TO_R, MPI_COMM_WORLD, &reqs[6]);
-		MPI_Isend(static_cast<void*>(rgt_buf_h.data()), 3*(NY-2), MFLOAT, rank, TAG_R_TO_L, MPI_COMM_WORLD, &reqs[7]);
-		// 4. wait on completion
-		MPI_Waitall(8, reqs, MPI_STATUS_IGNORE);
-		// 5. unpack buffers
-		Kokkos::deep_copy(top_buf, top_buf_h);
-		Kokkos::deep_copy(bot_buf, bot_buf_h);
-		Kokkos::deep_copy(lft_buf, lft_buf_h);
-		Kokkos::deep_copy(rgt_buf, rgt_buf_h);
-		Kokkos::fence();
-		// | 6   2   5 |
-		// |   \ | /   |
-		// | 3 - 0 - 1 |
-		// |   / | \   |
-		// | 7   4   8 |
-		Kokkos::parallel_for("unpack top/bot halo buffer", NX-2, KOKKOS_LAMBDA(const UINT x){
-				// top: y=NY-1
-				const UINT y{ny() - 1};
-				VIEW(f, x+1, y, 7) = top_buf(3*x  );
-				VIEW(f, x+1, y, 4) = top_buf(3*x+1);
-				VIEW(f, x+1, y, 8) = top_buf(3*x+2);
-				// bot: y=0
-				VIEW(f, x+1, 0, 6) = bot_buf(3*x  );
-				VIEW(f, x+1, 0, 2) = bot_buf(3*x+1);
-				VIEW(f, x+1, 0, 5) = bot_buf(3*x+2);
-			}
-		);
-		Kokkos::parallel_for("unpack lft/rgt halo buffer", NY-2, KOKKOS_LAMBDA(const UINT y){
-				// left: x=0
-				VIEW(f, 0, y+1, 8) = lft_buf(3*y  );
-				VIEW(f, 0, y+1, 1) = lft_buf(3*y+1);
-				VIEW(f, 0, y+1, 5) = lft_buf(3*y+2);
-				// right: x=NX-1
-				const UINT x{nx() - 1};
-				VIEW(f, x, y+1, 7) = rgt_buf(3*y  );
-				VIEW(f, x, y+1, 3) = rgt_buf(3*y+1);
-				VIEW(f, x, y+1, 6) = rgt_buf(3*y+2);
-			}
-		);
+		Kokkos::deep_copy(top_buf_send, top_buf);
+		Kokkos::deep_copy(bot_buf_send, bot_buf);
+		Kokkos::deep_copy(lft_buf_send, lft_buf);
+		Kokkos::deep_copy(rgt_buf_send, rgt_buf);
+		Kokkos::deep_copy(lt_send     , lt     );
+		Kokkos::deep_copy(rt_send     , rt     );
+		Kokkos::deep_copy(lb_send     , lb     );
+		Kokkos::deep_copy(rb_send     , rb     );
 		Kokkos::fence();
 
-		// finally, send corners
-		MPI_Irecv(static_cast<void*>(lt_h.data()), 1, MFLOAT, rank, TAG_RB_TO_LT, MPI_COMM_WORLD, &reqs[0]);
-		MPI_Irecv(static_cast<void*>(rt_h.data()), 1, MFLOAT, rank, TAG_LB_TO_RT, MPI_COMM_WORLD, &reqs[1]);
-		MPI_Irecv(static_cast<void*>(lb_h.data()), 1, MFLOAT, rank, TAG_RT_TO_LB, MPI_COMM_WORLD, &reqs[2]);
-		MPI_Irecv(static_cast<void*>(rb_h.data()), 1, MFLOAT, rank, TAG_LT_TO_RB, MPI_COMM_WORLD, &reqs[3]);
-		// | 6   2   5 |
-		// |   \ | /   |
-		// | 3 - 0 - 1 |
-		// |   / | \   |
-		// | 7   4   8 |
-		Kokkos::parallel_for("pack corners", 1, KOKKOS_LAMBDA(const UINT i){
-				const UINT NX{nx()};
-				const UINT NY{ny()};
-				lt() = VIEW(f, 1, NY-2, 6);
-				rt() = VIEW(f, NX-2, NY-2, 5);
-				lb() = VIEW(f, 1, 1, 7);
-				rb() = VIEW(f, NX-2, 1, 8);
-			}
-		);
-		Kokkos::fence();
-		Kokkos::deep_copy(lt_h, lt);
-		Kokkos::deep_copy(rt_h, rt);
-		Kokkos::deep_copy(lb_h, lb);
-		Kokkos::deep_copy(rb_h, rb);
-		Kokkos::fence();
-		MPI_Isend(static_cast<void*>(lt_h.data()), 1, MFLOAT, rank, TAG_LT_TO_RB, MPI_COMM_WORLD, &reqs[4]);
-		MPI_Isend(static_cast<void*>(rt_h.data()), 1, MFLOAT, rank, TAG_RT_TO_LB, MPI_COMM_WORLD, &reqs[5]);
-		MPI_Isend(static_cast<void*>(lb_h.data()), 1, MFLOAT, rank, TAG_LB_TO_RT, MPI_COMM_WORLD, &reqs[6]);
-		MPI_Isend(static_cast<void*>(rb_h.data()), 1, MFLOAT, rank, TAG_RB_TO_LT, MPI_COMM_WORLD, &reqs[7]);
-		MPI_Waitall(8, reqs, MPI_STATUS_IGNORE);
-		Kokkos::deep_copy(lt, lt_h);
-		Kokkos::deep_copy(rt, rt_h);
-		Kokkos::deep_copy(lb, lb_h);
-		Kokkos::deep_copy(rb, rb_h);
-		// | 6   2   5 |
-		// |   \ | /   |
-		// | 3 - 0 - 1 |
-		// |   / | \   |
-		// | 7   4   8 |
-		Kokkos::parallel_for("unpack corners", 1, KOKKOS_LAMBDA(const UINT i){
-				const UINT NX{nx()};
-				const UINT NY{ny()};
-				VIEW(f, NX-1, 0, 6) = rb();
-				VIEW(f, 0, 0, 5) = lb();
-				VIEW(f, NX-1, NY-1, 7) = rt();
-				VIEW(f, 0, NY-1, 8) = lt();
-			}
-		);
-		Kokkos::fence();
+		// 3. POST SENDS
+		MPI_Isend(static_cast<void*>(top_buf_send.data()), top_buf_send.size(), MFLOAT, rank, TAG_T_TO_B  , MPI_COMM_WORLD, &reqs[ 8]);
+		MPI_Isend(static_cast<void*>(bot_buf_send.data()), bot_buf_send.size(), MFLOAT, rank, TAG_B_TO_T  , MPI_COMM_WORLD, &reqs[ 9]);
+		MPI_Isend(static_cast<void*>(lft_buf_send.data()), lft_buf_send.size(), MFLOAT, rank, TAG_L_TO_R  , MPI_COMM_WORLD, &reqs[10]);
+		MPI_Isend(static_cast<void*>(rgt_buf_send.data()), rgt_buf_send.size(), MFLOAT, rank, TAG_R_TO_L  , MPI_COMM_WORLD, &reqs[11]);
+		MPI_Isend(static_cast<void*>(lt_send.data())     , lt_send.size()     , MFLOAT, rank, TAG_LT_TO_RB, MPI_COMM_WORLD, &reqs[12]);
+		MPI_Isend(static_cast<void*>(rt_send.data())     , rt_send.size()     , MFLOAT, rank, TAG_RT_TO_LB, MPI_COMM_WORLD, &reqs[13]);
+		MPI_Isend(static_cast<void*>(lb_send.data())     , lb_send.size()     , MFLOAT, rank, TAG_LB_TO_RT, MPI_COMM_WORLD, &reqs[14]);
+		MPI_Isend(static_cast<void*>(rb_send.data())     , rb_send.size()     , MFLOAT, rank, TAG_RB_TO_LT, MPI_COMM_WORLD, &reqs[15]);
 
-		// std::cout<<"POST-MPI"<<std::endl;
-		// if (!output(vel, f, buf, 1, 1, NX-1, NY-1)){ return false; };
-		// std::cout<<"POST-MPI END"<<std::endl;
+		// 4. WAIT FOR COMMUNICATION TO FINISH
+		MPI_Waitall(16, reqs, MPI_STATUSES_IGNORE);
+
+		// 5. UNPACK
+		Kokkos::fence();
+		Kokkos::deep_copy(top_buf, top_buf_recv);
+		Kokkos::deep_copy(bot_buf, bot_buf_recv);
+		Kokkos::deep_copy(lft_buf, lft_buf_recv);
+		Kokkos::deep_copy(rgt_buf, rgt_buf_recv);
+		Kokkos::deep_copy(lt     , lt_recv     );
+		Kokkos::deep_copy(rt     , rt_recv     );
+		Kokkos::deep_copy(lb     , lb_recv     );
+		Kokkos::deep_copy(rb     , rb_recv     );
+		Kokkos::fence();
+		Kokkos::parallel_for("top/bot unpacking", NX-2, KOKKOS_LAMBDA(const UINT x){
+			// top: y=NY-2 -> bot: y=0
+			const UINT NY{ny()};
+			const UINT OFF{nx()-2};
+			VIEW(f, x+1, 0, 6) = bot_buf(x      );
+			VIEW(f, x+1, 0, 2) = bot_buf(x+  OFF);
+			VIEW(f, x+1, 0, 5) = bot_buf(x+2*OFF);
+			// bot: y=1 -> top: y=NY-1
+			VIEW(f, x+1, NY-1, 7) = top_buf(x      );
+			VIEW(f, x+1, NY-1, 4) = top_buf(x+  OFF);
+			VIEW(f, x+1, NY-1, 8) = top_buf(x+2*OFF);
+		});
+		Kokkos::parallel_for("lft/rgt unpacking", NY-2, KOKKOS_LAMBDA(const UINT y){
+			const UINT NX{nx()};
+			const UINT OFF{ny()-2};
+			// left: x=1 ->  right: x=NX-1
+			VIEW(f, NX-1, y+1, 7) = rgt_buf(y      );
+			VIEW(f, NX-1, y+1, 3) = rgt_buf(y+  OFF);
+			VIEW(f, NX-1, y+1, 6) = rgt_buf(y+2*OFF);
+			// right: x=NX-2 ->  left: x=0
+			VIEW(f, 0, y+1, 8) = lft_buf(y      );
+			VIEW(f, 0, y+1, 1) = lft_buf(y+  OFF);
+			VIEW(f, 0, y+1, 5) = lft_buf(y+2*OFF);
+		});
+		Kokkos::parallel_for("corner exchange", 1, KOKKOS_LAMBDA(const UINT i){
+			const UINT NX{nx()};
+			const UINT NY{ny()};
+			// lt -> rb
+			VIEW(f, NX-1, 0, 6) = rb();
+			// rt -> lb
+			VIEW(f, 0, 0, 5) = lb();
+			// lb -> rt
+			VIEW(f, NX-1, NY-1, 7) = rt();
+			// rb -> lt
+			VIEW(f, 0, NY-1, 8) = lt();
+		});
+
+
+		// correct_halo_periodic(nx,ny,f);
 
 		// write results to std::out
 		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
