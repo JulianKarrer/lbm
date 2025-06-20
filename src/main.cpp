@@ -521,7 +521,7 @@ FLOAT f_eq(FLOAT ux, FLOAT uy, FLOAT rho_i, UINT dir){
 	);
 }
 
-void init_shearwave(Vel_t &vel, Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, UINT HX, UINT HY, UINT GLY){
+void init_shearwave(Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, UINT HX, UINT HY, UINT GLY){
     Kokkos::parallel_for(
 		"initialize", 
 		Kokkos::MDRangePolicy({LX, LY}, {HX, HY}, {TX, TY}), 
@@ -532,28 +532,22 @@ void init_shearwave(Vel_t &vel, Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT L
 			const FLOAT u_init { u() }; 
 			const FLOAT y_scaled { ((FLOAT)(y-1))/((FLOAT) (NY-2)) }; // scale y to rank-independent, global y
 			const FLOAT ux{u_init * SIN(2.0*M_PI * y_scaled)}; // this implements a shear wave
-			const FLOAT uy{0.};
-			vel(x,y,0) = ux;
-			vel(x,y,1) = uy;
 
 			// set inital distribution to equilibrium distribution
 			for (UINT dir{0}; dir<Q; ++dir){
-				VIEW(f,x,y,dir) = f_eq(ux,uy,rho_i,dir);
+				VIEW(f,x,y,dir) = f_eq(ux,0.,rho_i,dir);
 			}
 		}
 	);
 }
 
-void init_rest(Vel_t &vel, Dst_t &f, SFL &rho_init){
+void init_rest(Dst_t &f, SFL &rho_init){
     Kokkos::parallel_for(
 		"initialize at rest", 
 		Kokkos::MDRangePolicy({0, 0}, {NX, NY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			// set initial densities to specified value
 			const FLOAT rho_i { rho_init() }; 
-			// set velocities to zero
-			vel(x,y,0) = 0.;
-			vel(x,y,1) = 0.;
 			// the inital equilibrium distribution is therefore also zero
 			for (UINT dir{0}; dir<Q; ++dir){
 				VIEW(f,x,y,dir) = f_eq(0.,0.,rho_i,dir);
@@ -568,16 +562,27 @@ bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY
 	{
 	case OUTPUT_TYPE::MAX_VEL:
 		{
-			// reconstruct density and velocity fields
-			compute_velocities(vel, f, LX, LY, HX, HY);
 			// find maximum velocity magnitude via parallel reduce
 			FLOAT max_x_vel = -1e30;
 			Kokkos::parallel_reduce(
 				"find max x-velocity",
 				Kokkos::MDRangePolicy<Kokkos::Rank<2>>({LX, LY}, {HX, HY}),
-				KOKKOS_LAMBDA(const int i, const int j, FLOAT& local_max) {
-					const FLOAT ux = vel(i, j, 0);
-					const FLOAT uy = vel(i, j, 1);
+				KOKKOS_LAMBDA(const int x, const int y, FLOAT& local_max) {
+					// compute velocity
+					const FLOAT f_0 { VIEW(f, x, y, 0) };
+					const FLOAT f_1 { VIEW(f, x, y, 1) };
+					const FLOAT f_2 { VIEW(f, x, y, 2) };
+					const FLOAT f_3 { VIEW(f, x, y, 3) };
+					const FLOAT f_4 { VIEW(f, x, y, 4) };
+					const FLOAT f_5 { VIEW(f, x, y, 5) };
+					const FLOAT f_6 { VIEW(f, x, y, 6) };
+					const FLOAT f_7 { VIEW(f, x, y, 7) };
+					const FLOAT f_8 { VIEW(f, x, y, 8) };
+					constexpr FLOAT f1 {1.0};
+					const FLOAT rho_inv {f1/(f_0 + f_1 + f_2 + f_3 + f_4 + f_5 + f_6 + f_7 + f_8)};
+					const FLOAT ux {(f_1-f_3+f_5-f_6-f_7+f_8)*rho_inv};
+					const FLOAT uy {(f_2-f_4+f_5+f_6-f_7-f_8)*rho_inv};
+					// compute magnitude and perform reduction
 					const FLOAT u = SQRT(ux*ux+uy*uy);
 					if (u > local_max) local_max = u;
 				},
@@ -826,10 +831,51 @@ void correct_halo_periodic(SUI &nx, SUI &ny, Dst_t &f){
 }
 
 
-bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
-    Vel_t vel("vel", NX, NY);
-	Dst_t f  ("f"  , Q, NY, NX);
-    Dst_t buf("buf", Q, NY, NX);
+bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
+	// CREATE CARTESIAN COMMUNICATOR
+	// https://wgropp.cs.illinois.edu/courses/cs598-s15/lectures/lecture28.pdf
+	// define a cartesian grid communicator for efficient mapping of virtual to physical topology
+	MPI_Comm grid;
+	int size, rank;
+	int dims[2] {0,0};  					// don't fix any dimension, create a grid
+	int coords[2] {0,0};					// store coordinates of current rank
+	int periods[2] {1,1};					// periodicity along each dimension
+	int rank_L, rank_R, rank_D, rank_U, rank_DL, rank_DR, rank_UL, rank_UR;		// store ranks of each neighbouring node in 2D grid
+    MPI_Comm_size(MPI_COMM_WORLD, &size); 	// get total number of processes
+	MPI_Dims_create(size, 2, dims);			// get optimized number of processes along each dimension
+	MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1, &grid);
+	MPI_Comm_rank(grid, &rank); 			// get own rank only now, w.r.t. grid, since reorder = 1 = true
+	MPI_Cart_coords(grid, rank, 2, coords); // get the coordinates of the current rank
+	// // get ranks of immediate neighbours
+	// MPI_Cart_shift(grid, 0,  1, &rank_L, &rank_R);
+	// MPI_Cart_shift(grid, 1,  1, &rank_D, &rank_U);
+	// get ranks of neighbours, no need for % since periodic = 1 everywhere
+	int nbr_coords[8][2] {
+		{coords[0]-1, coords[1]  },
+		{coords[0]+1, coords[1]  },
+		{coords[0]  , coords[1]-1},
+		{coords[0]  , coords[1]+1},
+		{coords[0]-1, coords[1]-1},
+		{coords[0]+1, coords[1]-1},
+		{coords[0]-1, coords[1]+1},
+		{coords[0]+1, coords[1]+1},
+	};
+	MPI_Cart_rank(grid, nbr_coords[0], &rank_L );
+	MPI_Cart_rank(grid, nbr_coords[1], &rank_R );
+	MPI_Cart_rank(grid, nbr_coords[2], &rank_D );
+	MPI_Cart_rank(grid, nbr_coords[3], &rank_U );
+	MPI_Cart_rank(grid, nbr_coords[4], &rank_DL);
+	MPI_Cart_rank(grid, nbr_coords[5], &rank_DR);
+	MPI_Cart_rank(grid, nbr_coords[6], &rank_UL);
+	MPI_Cart_rank(grid, nbr_coords[7], &rank_UR);
+
+	// create two buffers for use in two-grid, one-step updates
+	Dst_t f  ("f"  , Q, NY, NX); // only for reading
+    Dst_t buf("buf", Q, NY, NX); // only for writing
+
+	// create buffer for velocity field in case it is needed for output
+	Vel_t vel("vel", NX, NY);
+
 	// prepare MPI buffers, tags and request array
 	Hlo_t top_buf("top halo buffer", (NX-2)*3);
 	Hlo_t bot_buf("bot halo buffer", (NX-2)*3);
@@ -868,19 +914,15 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 	const int TAG_RB_TO_LT {7};
 	MPI_Request reqs[16];
 
-	// initialize quantities
+
+	// initialize distribution field to given initial conditions
 	// (buf need not be initialized since it is written to everywhere)
 	switch (SCENE){
 		case SCENE_TYPE::LID_DRIVEN:
-			// init_shearwave(vel, f, ny, rho_init, u); break;
-			init_rest(vel, f, rho_init); break;
+			init_rest(f, rho_init); break;
 		default:
-			init_shearwave(vel, f, ny, rho_init, u, 1, 1, NX-1, NY-1, 1); break;
+			init_shearwave(f, ny, rho_init, u, 1, 1, NX-1, NY-1, 1); break;
 	}
-
-	// std::cout<<"INITIAL"<<std::endl;
-	// if (!output(vel, f, buf, 1, 1, NX-1, NY-1)){ return false; };
-	// std::cout<<"END INITIAL"<<std::endl;
 
 	// main simulation loop
     for (UINT t{0}; t < STEPS; ++t){
@@ -890,14 +932,14 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 		// https://www.osti.gov/servlets/purl/1818024
 
 		// STEP 1: POST RECEIVES
-		MPI_Irecv(static_cast<void*>(top_buf_recv.data()), top_buf_recv.size(), MFLOAT, rank, TAG_B_TO_T  , MPI_COMM_WORLD, &reqs[ 0]);
-		MPI_Irecv(static_cast<void*>(bot_buf_recv.data()), bot_buf_recv.size(), MFLOAT, rank, TAG_T_TO_B  , MPI_COMM_WORLD, &reqs[ 1]);
-		MPI_Irecv(static_cast<void*>(lft_buf_recv.data()), lft_buf_recv.size(), MFLOAT, rank, TAG_R_TO_L  , MPI_COMM_WORLD, &reqs[ 2]);
-		MPI_Irecv(static_cast<void*>(rgt_buf_recv.data()), rgt_buf_recv.size(), MFLOAT, rank, TAG_L_TO_R  , MPI_COMM_WORLD, &reqs[ 3]);
-		MPI_Irecv(static_cast<void*>(lt_recv.data())     , lt_recv.size()     , MFLOAT, rank, TAG_RB_TO_LT, MPI_COMM_WORLD, &reqs[ 4]);
-		MPI_Irecv(static_cast<void*>(rt_recv.data())     , rt_recv.size()     , MFLOAT, rank, TAG_LB_TO_RT, MPI_COMM_WORLD, &reqs[ 5]);
-		MPI_Irecv(static_cast<void*>(lb_recv.data())     , lb_recv.size()     , MFLOAT, rank, TAG_RT_TO_LB, MPI_COMM_WORLD, &reqs[ 6]);
-		MPI_Irecv(static_cast<void*>(rb_recv.data())     , rb_recv.size()     , MFLOAT, rank, TAG_LT_TO_RB, MPI_COMM_WORLD, &reqs[ 7]);
+		MPI_Irecv(static_cast<void*>(top_buf_recv.data()), top_buf_recv.size(), MFLOAT, rank_U , TAG_B_TO_T  , grid, &reqs[ 0]);
+		MPI_Irecv(static_cast<void*>(bot_buf_recv.data()), bot_buf_recv.size(), MFLOAT, rank_D , TAG_T_TO_B  , grid, &reqs[ 1]);
+		MPI_Irecv(static_cast<void*>(lft_buf_recv.data()), lft_buf_recv.size(), MFLOAT, rank_L , TAG_R_TO_L  , grid, &reqs[ 2]);
+		MPI_Irecv(static_cast<void*>(rgt_buf_recv.data()), rgt_buf_recv.size(), MFLOAT, rank_R , TAG_L_TO_R  , grid, &reqs[ 3]);
+		MPI_Irecv(static_cast<void*>(lt_recv.data())     , lt_recv.size()     , MFLOAT, rank_UL, TAG_RB_TO_LT, grid, &reqs[ 4]);
+		MPI_Irecv(static_cast<void*>(rt_recv.data())     , rt_recv.size()     , MFLOAT, rank_UR, TAG_LB_TO_RT, grid, &reqs[ 5]);
+		MPI_Irecv(static_cast<void*>(lb_recv.data())     , lb_recv.size()     , MFLOAT, rank_DL, TAG_RT_TO_LB, grid, &reqs[ 6]);
+		MPI_Irecv(static_cast<void*>(rb_recv.data())     , rb_recv.size()     , MFLOAT, rank_DR, TAG_LT_TO_RB, grid, &reqs[ 7]);
 
 		// STEP 2: PACKING
 		// 		| 6   2   5 |
@@ -954,14 +996,14 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u, int rank){
 
 
 		// 3. POST SENDS
-		MPI_Isend(static_cast<void*>(top_buf_send.data()), top_buf_send.size(), MFLOAT, rank, TAG_T_TO_B  , MPI_COMM_WORLD, &reqs[ 8]);
-		MPI_Isend(static_cast<void*>(bot_buf_send.data()), bot_buf_send.size(), MFLOAT, rank, TAG_B_TO_T  , MPI_COMM_WORLD, &reqs[ 9]);
-		MPI_Isend(static_cast<void*>(lft_buf_send.data()), lft_buf_send.size(), MFLOAT, rank, TAG_L_TO_R  , MPI_COMM_WORLD, &reqs[10]);
-		MPI_Isend(static_cast<void*>(rgt_buf_send.data()), rgt_buf_send.size(), MFLOAT, rank, TAG_R_TO_L  , MPI_COMM_WORLD, &reqs[11]);
-		MPI_Isend(static_cast<void*>(lt_send.data())     , lt_send.size()     , MFLOAT, rank, TAG_LT_TO_RB, MPI_COMM_WORLD, &reqs[12]);
-		MPI_Isend(static_cast<void*>(rt_send.data())     , rt_send.size()     , MFLOAT, rank, TAG_RT_TO_LB, MPI_COMM_WORLD, &reqs[13]);
-		MPI_Isend(static_cast<void*>(lb_send.data())     , lb_send.size()     , MFLOAT, rank, TAG_LB_TO_RT, MPI_COMM_WORLD, &reqs[14]);
-		MPI_Isend(static_cast<void*>(rb_send.data())     , rb_send.size()     , MFLOAT, rank, TAG_RB_TO_LT, MPI_COMM_WORLD, &reqs[15]);
+		MPI_Isend(static_cast<void*>(top_buf_send.data()), top_buf_send.size(), MFLOAT, rank_U , TAG_T_TO_B  , grid, &reqs[ 8]);
+		MPI_Isend(static_cast<void*>(bot_buf_send.data()), bot_buf_send.size(), MFLOAT, rank_D , TAG_B_TO_T  , grid, &reqs[ 9]);
+		MPI_Isend(static_cast<void*>(lft_buf_send.data()), lft_buf_send.size(), MFLOAT, rank_L , TAG_L_TO_R  , grid, &reqs[10]);
+		MPI_Isend(static_cast<void*>(rgt_buf_send.data()), rgt_buf_send.size(), MFLOAT, rank_R , TAG_R_TO_L  , grid, &reqs[11]);
+		MPI_Isend(static_cast<void*>(lt_send.data())     , lt_send.size()     , MFLOAT, rank_UL, TAG_LT_TO_RB, grid, &reqs[12]);
+		MPI_Isend(static_cast<void*>(rt_send.data())     , rt_send.size()     , MFLOAT, rank_UR, TAG_RT_TO_LB, grid, &reqs[13]);
+		MPI_Isend(static_cast<void*>(lb_send.data())     , lb_send.size()     , MFLOAT, rank_DL, TAG_LB_TO_RT, grid, &reqs[14]);
+		MPI_Isend(static_cast<void*>(rb_send.data())     , rb_send.size()     , MFLOAT, rank_DR, TAG_RB_TO_LT, grid, &reqs[15]);
 
 		// WORK
 		switch (SCENE){
@@ -1072,11 +1114,6 @@ int main(int argc, char *argv[]) {
     Kokkos::initialize(argc, argv);
 	// Kokkos::print_configuration(std::cout);
 
-	int size, rank;
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
-	std::cout << "rank = " << rank << "/" << size << std::endl;
-
 	// new scope to make sure deallocation precedes finalize()
 	bool success {true};
 	{
@@ -1104,7 +1141,7 @@ int main(int argc, char *argv[]) {
 
 		// Run the simulation
 		auto start {std::chrono::high_resolution_clock::now()};
-		success = run_simulation(nx, ny, om, rho, u, rank);
+		success = run_simulation(nx, ny, om, rho, u);
 		auto end {std::chrono::high_resolution_clock::now()};
 		// print the MLUPS count
 		auto span {std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()};
