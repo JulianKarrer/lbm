@@ -18,6 +18,7 @@ NY = 256
 TOTAL_STEPS = 25_000
 OMEGA_STEPS = 5
 OMEGAS = [(1./OMEGA_STEPS)*i for i in range(1,OMEGA_STEPS+1)]
+RANKS = 1
 # OMEGAS = [0.5]
 
 
@@ -57,7 +58,9 @@ nu_from_omega = lambda omega:(1./3.)*(1./omega - 0.5)
 for omega in OMEGAS:
     # run the program, get the output
     res = subprocess.run([
+        "mpirun", "-n", str(RANKS), 
         "./main", 
+        # "-nmpi",
         "-w", str(omega),
         "-nx", str(NX),
         "-ny", str(NY),

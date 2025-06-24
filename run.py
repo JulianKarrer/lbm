@@ -29,6 +29,7 @@ subprocess.run(["cmake", "--build", "build"], check=True)
 # run the program, get the output
 res = subprocess.run([
         "./main", 
+        "-nmpi",
         "-w", str(OMEGA),
         "-nx", str(NX),
         "-ny", str(NY),
@@ -52,7 +53,7 @@ print("number of frames:", len(frames))
 frames = np.array(frames)
 # np.save(DATA_FILE_NAME, frames)
 # frames = np.load(DATA_FILE_NAME)
-print(frames[10])
+# print(frames[10])
 
 # setup animation
 x = np.arange(NX)
@@ -78,7 +79,7 @@ ax.set_ylabel("y")
 
 def update(frame_idx):
     ax.clear()
-    cf = ax.contourf(X, Y, frames[frame_idx], levels=levels, cmap=CMAP)
+    cf = ax.contourf(X, Y, frames[frame_idx].T, levels=levels, cmap=CMAP)
     ax.set_title(TITLE)
     return cf.collections
 

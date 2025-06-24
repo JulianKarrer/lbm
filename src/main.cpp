@@ -54,6 +54,8 @@ std::ostream* OUT_STREAM{&std::cout};
 /// OUT_STREAM relies on this to have a static lifetime so the stream is not destructed before the program terminates.
 std::ofstream OUT_FILE;
 
+bool USE_MPI {true};
+
 /// @brief dump simulation results to std::out every so many timesteps
 UINT OUT_EVERY_N{0};
 /// @brief number of total time steps of the simulation
@@ -521,7 +523,7 @@ FLOAT f_eq(FLOAT ux, FLOAT uy, FLOAT rho_i, UINT dir){
 	);
 }
 
-void init_shearwave(Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, UINT HX, UINT HY, UINT GLY){
+void init_shearwave(Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, UINT HX, UINT HY, SUI &ylow, SUI &yhigh){
     Kokkos::parallel_for(
 		"initialize", 
 		Kokkos::MDRangePolicy({LX, LY}, {HX, HY}, {TX, TY}), 
@@ -529,8 +531,10 @@ void init_shearwave(Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, 
 			const FLOAT rho_i { rho_init() };  // use initial density
 			// set initial velocities
 			const UINT NY{ny()};
+			const UINT YL{ylow()};
+			const UINT YH{yhigh()};
 			const FLOAT u_init { u() }; 
-			const FLOAT y_scaled { ((FLOAT)(y-1))/((FLOAT) (NY-2)) }; // scale y to rank-independent, global y
+			const FLOAT y_scaled { ((FLOAT)(y-YL))/((FLOAT) (YH-YL)) }; // scale y to rank-independent, global y
 			const FLOAT ux{u_init * SIN(2.0*M_PI * y_scaled)}; // this implements a shear wave
 
 			// set inital distribution to equilibrium distribution
@@ -556,14 +560,14 @@ void init_rest(Dst_t &f, SFL &rho_init){
 	);
 }
 
-bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY){
+bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY, int rank){
 	// output depending on selected OUTPUT_TYPE
 	switch (OUTPUT)
 	{
 	case OUTPUT_TYPE::MAX_VEL:
 		{
 			// find maximum velocity magnitude via parallel reduce
-			FLOAT max_x_vel = -1e30;
+			FLOAT max_vel_mag = -1e30;
 			Kokkos::parallel_reduce(
 				"find max x-velocity",
 				Kokkos::MDRangePolicy<Kokkos::Rank<2>>({LX, LY}, {HX, HY}),
@@ -586,13 +590,25 @@ bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY
 					const FLOAT u = SQRT(ux*ux+uy*uy);
 					if (u > local_max) local_max = u;
 				},
-				Kokkos::Max<FLOAT>(max_x_vel)
+				Kokkos::Max<FLOAT>(max_vel_mag)
 			);
-			(*OUT_STREAM) << max_x_vel << "," << std::flush;
+			if (USE_MPI){
+				// MPI: max-reduce the local maximum velocity magnitude, output on rank 0
+				FLOAT global_max {max_vel_mag};
+				MPI_Reduce(&max_vel_mag, &global_max, 1, MFLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
+				if (rank==0){
+					(*OUT_STREAM) << global_max << "," << std::flush;
+				}
+			} else {
+				// single node: just output the maximum velocity magnitude
+				(*OUT_STREAM) << max_vel_mag << "," << std::flush;
+			}
 		}
 		break;
 	case OUTPUT_TYPE::VEL_MAGS:
 		{	
+			// TODO:
+			if (USE_MPI){std::cerr<<"This output type is currently unsupported in MPI mode. Try --nmpi."<<std::endl;return false;}
 			// reconstruct density and velocity fields
 			compute_velocities(vel, f, LX, LY, HX, HY);
 			// copy velocity from device to host-accessible buffer
@@ -625,6 +641,8 @@ bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY
 		break;
 	case OUTPUT_TYPE::VEL_FIELD:
 		{	
+			// TODO:
+			if (USE_MPI){std::cerr<<"This output type is currently unsupported in MPI mode. Try --nmpi."<<std::endl;return false;}
 			// reconstruct density and velocity fields
 			compute_velocities(vel, f, LX, LY, HX, HY);
 			// copy velocity from device to host-accessible buffer
@@ -748,6 +766,11 @@ void parse_args(int argc, char *argv[]){
 	sim_type.add_argument("-ld", "--lid-driven-cavity")
 		.help("Simulate a lid driven cavity with bounce-back solid walls and a moving wall at the top, where the fluid is initially at rest.")
 		.implicit_value(true);
+	// enable/disable MPI usage
+	program
+		.add_argument("-nmpi", "--no-mpi")
+		.help("If specified, refrain from using MPI and halo regions and calculate only on a single process.")
+		.implicit_value(true);
 
 	// parse the arguments
 	try {
@@ -786,13 +809,17 @@ void parse_args(int argc, char *argv[]){
 	} else {
 		SCENE = SCENE_TYPE::SHEAR_WAVE;
 	}
-	
-	// add to NX,NY to account for halo
-	NX += 2;
-	NY += 2;
+	// mpi usage
+	if (program.is_used("-nmpi")){
+		USE_MPI = false;
+	} else{
+		// add to NX,NY to account for halo
+		NX += 2;
+		NY += 2;
+	}
 }
 
-/// executes kernels that emulate what MPI is supposed to do, but only for the current node
+/// executes kernels that emulate what MPI is supposed to do if there was only a single rank
 void correct_halo_periodic(SUI &nx, SUI &ny, Dst_t &f){
 	Kokkos::parallel_for("top/bot exchange", NX-2, KOKKOS_LAMBDA(const UINT x){
 		// top: y=NY-2 -> bot: y=0
@@ -830,8 +857,58 @@ void correct_halo_periodic(SUI &nx, SUI &ny, Dst_t &f){
 	});
 }
 
+bool run_simulation_single_node(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
+	// create two buffers for use in two-grid, one-step updates
+	Dst_t f  ("f"  , Q, NY, NX); // only for reading
+    Dst_t buf("buf", Q, NY, NX); // only for writing
+	// create buffer for velocity field in case it is needed for output
+	Vel_t vel("vel", NX, NY);
 
-bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
+	// establish initial conditions
+	switch (SCENE){
+		case SCENE_TYPE::LID_DRIVEN:
+			init_rest(f, rho_init); break;
+		default:
+			SUI yl("YL");
+			SUI yh("YH");
+			auto host_yl = Kokkos::create_mirror_view(yl);
+			auto host_yh = Kokkos::create_mirror_view(yh);
+			host_yl() = 0; 		// global y offset: 0
+			host_yh() = NY; 	// global y size: NY
+			Kokkos::deep_copy(yl, host_yl);
+			Kokkos::deep_copy(yh, host_yh);
+			init_shearwave(f, ny, rho_init, u, 0, 0, NX, NY, yl, yh); break;
+	}
+
+	// main simulation loop
+    for (UINT t{0}; t < STEPS; ++t){
+		// write results to std::out
+		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
+			if (!output(vel, f, buf, 0, 0, NX, NY, 0)){ return false; };
+		}
+
+		// do a single fused step of collision and streaming, tailored to the respective boundary conditions of the scene
+		switch (SCENE){
+			case SCENE_TYPE::LID_DRIVEN:
+				push_lid_driven(f, buf, nx, ny, om, rho_init, u);
+				break;
+			default:
+				// full domain, no halo:
+				pull_periodic_no_mpi(f, buf, nx, ny, om);
+				break;
+		}
+
+		// swap write buffer and read buffer
+		auto temp = f;
+		f = buf;
+		buf = temp;
+    };
+
+	return true;
+
+}
+
+bool run_simulation_mpi(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 	// CREATE CARTESIAN COMMUNICATOR
 	// https://wgropp.cs.illinois.edu/courses/cs598-s15/lectures/lecture28.pdf
 	// define a cartesian grid communicator for efficient mapping of virtual to physical topology
@@ -921,7 +998,15 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 		case SCENE_TYPE::LID_DRIVEN:
 			init_rest(f, rho_init); break;
 		default:
-			init_shearwave(f, ny, rho_init, u, 1, 1, NX-1, NY-1, 1); break;
+			SUI yl("YL");
+			SUI yh("YH");
+			auto host_yl = Kokkos::create_mirror_view(yl);
+			auto host_yh = Kokkos::create_mirror_view(yh);
+			host_yl() = 0; 		// global y offset: 1
+			host_yh() = NY-2; 	// global y size: NY-2
+			Kokkos::deep_copy(yl, host_yl);
+			Kokkos::deep_copy(yh, host_yh);
+			init_shearwave(f, ny, rho_init, u, 1, 1, NX-1, NY-1, yl, yh); break;
 	}
 
 	// main simulation loop
@@ -1005,6 +1090,25 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 		MPI_Isend(static_cast<void*>(lb_send.data())     , lb_send.size()     , MFLOAT, rank_DL, TAG_LB_TO_RT, grid, &reqs[14]);
 		MPI_Isend(static_cast<void*>(rb_send.data())     , rb_send.size()     , MFLOAT, rank_DR, TAG_RB_TO_LT, grid, &reqs[15]);
 
+		// // SENDRECV VARIANT (does not work at the moment)
+		// MPI_Status ignore;
+		// MPI_Sendrecv(static_cast<void*>(top_buf_send.data()), top_buf_send.size(), MFLOAT, rank_U , 0  , 
+		// 			static_cast<void*>(bot_buf_recv.data()), bot_buf_recv.size(), MFLOAT, rank_D , 0  ,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(bot_buf_send.data()), bot_buf_send.size(), MFLOAT, rank_D , 0  , 
+		// 			static_cast<void*>(top_buf_recv.data()), top_buf_recv.size(), MFLOAT, rank_U , 0  ,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(lft_buf_send.data()), lft_buf_send.size(), MFLOAT, rank_L , 0  ,
+		// 			static_cast<void*>(rgt_buf_recv.data()), rgt_buf_recv.size(), MFLOAT, rank_R , 0  ,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(rgt_buf_send.data()), rgt_buf_send.size(), MFLOAT, rank_R , 0  ,
+		// 			static_cast<void*>(lft_buf_recv.data()), lft_buf_recv.size(), MFLOAT, rank_L , 0  ,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(lt_send.data())     , lt_send.size()     , MFLOAT, rank_UL, 0,
+		// 			static_cast<void*>(rb_recv.data())     , rb_recv.size()     , MFLOAT, rank_DR, 0,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(rt_send.data())     , rt_send.size()     , MFLOAT, rank_UR, 0,
+		// 			static_cast<void*>(lb_recv.data())     , lb_recv.size()     , MFLOAT, rank_DL, 0,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(lb_send.data())     , lb_send.size()     , MFLOAT, rank_DL, 0,
+		// 			static_cast<void*>(rt_recv.data())     , rt_recv.size()     , MFLOAT, rank_UR, 0,grid, &ignore);
+		// MPI_Sendrecv(static_cast<void*>(rb_send.data())     , rb_send.size()     , MFLOAT, rank_DR, 0,
+		// 			static_cast<void*>(lt_recv.data())     , lt_recv.size()     , MFLOAT, rank_UL, 0,grid, &ignore);
+
 		// WORK
 		switch (SCENE){
 			case SCENE_TYPE::LID_DRIVEN:
@@ -1066,20 +1170,16 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 			VIEW(f, 0, NY-1, 8) = lt();
 		});
 
-
-		// correct_halo_periodic(nx,ny,f);
-
 		// write results to std::out
 		if (OUT_EVERY_N > 0 && t % OUT_EVERY_N == 0){
-			if (!output(vel, f, buf, 1, 1, NX-1, NY-1)){ return false; };
+			if (!output(vel, f, buf, 1, 1, NX-1, NY-1, rank)){ return false; };
 		}
 
 		// do a single fused step of collision and streaming, tailored to the respective boundary conditions of the scene
 		switch (SCENE){
 			case SCENE_TYPE::LID_DRIVEN:
-				push_lid_driven(f, buf, nx, ny, om, rho_init, u);
-				// boundary_correct_lid(f, nx, ny, rho_init, u);
-				break;
+				std::cerr << "Lid driven cavity currently not supported when using MPI" << std::endl;
+				return false;
 			default:
 				// push_periodic(f, buf, nx, ny, om); break;
 				pull_periodic_outer(f, buf, om, nx, ny); 
@@ -1093,11 +1193,6 @@ bool run_simulation(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 		auto temp = f;
 		f = buf;
 		buf = temp;
-
-		// report progress
-		// if (OUT_EVERY_N > 0){
-		// 	std::cerr << t << " / " << STEPS << "\r";
-		// }
     };
 
 	return true;
@@ -1141,7 +1236,7 @@ int main(int argc, char *argv[]) {
 
 		// Run the simulation
 		auto start {std::chrono::high_resolution_clock::now()};
-		success = run_simulation(nx, ny, om, rho, u);
+		success = USE_MPI ? run_simulation_mpi(nx, ny, om, rho, u) : run_simulation_single_node(nx, ny, om, rho, u);
 		auto end {std::chrono::high_resolution_clock::now()};
 		// print the MLUPS count
 		auto span {std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()};
