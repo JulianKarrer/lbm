@@ -18,7 +18,7 @@ NY = 256
 TOTAL_STEPS = 25_000
 OMEGA_STEPS = 5
 OMEGAS = [(1./OMEGA_STEPS)*i for i in range(1,OMEGA_STEPS+1)]
-RANKS = 1
+RANKS = 4
 # OMEGAS = [0.5]
 
 
@@ -57,17 +57,11 @@ nu_from_omega = lambda omega:(1./3.)*(1./omega - 0.5)
 
 for omega in OMEGAS:
     # run the program, get the output
-    res = subprocess.run([
-        "mpirun", "-n", str(RANKS), 
-        "./main", 
-        # "-nmpi",
-        "-w", str(omega),
-        "-nx", str(NX),
-        "-ny", str(NY),
-        "-of", str(DUMP_EVERY),
-        "-s", str(TOTAL_STEPS),
-        "-omv", # output max velocity
-    ], cwd="build",stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,check=False).stdout
+    command = f"mpirun -n {RANKS} ./main -w {omega} -nx {NX} -ny {NY} -of {DUMP_EVERY} -s {TOTAL_STEPS} -omv"
+    print("command running:", command)
+    output = subprocess.run(command.split(" "), cwd="build",stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False)
+    res = output.stdout
+    print(output.stderr)
 
     # collect the output velocity amplitudes
     max_us = []

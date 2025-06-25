@@ -7,14 +7,26 @@
 #include "Kokkos_Core.hpp"
 #include <mpi.h>
 
+// define the level of optimization tested in a benchmark
+#ifndef OPT
+	#define OPT 0
+#endif
+// OPT 1:
+// - use double instead of float
 
 // TYPES
 
 // define the used types and corresponding special functions as macros so they can be changed 
 // (e.g. to benchmark double vs. float performance) 
 // without refactoring the entire code
-#define FLOAT float
-#define MFLOAT MPI_FLOAT
+#if OPT == 1
+	#define FLOAT double
+	#define MFLOAT MPI_DOUBLE
+#else 
+	#define FLOAT float
+	#define MFLOAT MPI_FLOAT
+#endif
+
 #define SIN sinf
 #define SQRT sqrtf
 #define INT int32_t
@@ -100,10 +112,31 @@ using Bdy_t = Kokkos::View<UINT*[2], Kokkos::LayoutRight>;
 using Hlo_t = Kokkos::View<FLOAT*, Kokkos::LayoutRight>;
 
 /// @brief A scalar, unsigned int
-using SUI = Kokkos::View<UINT>;
+using DUI = Kokkos::View<UINT>;
 
 /// @brief A scalar float
-using SFL = Kokkos::View<FLOAT>;
+using DFL = Kokkos::View<FLOAT>;
+
+/// @brief Utility function for creating a device-side accessible UINT view with value x
+/// @param x the UINT to send to the device
+/// @return the device-side view containing x
+DUI create_device_uint(UINT x){
+	DUI dx("device-side uint");
+	auto host_dx = Kokkos::create_mirror_view(dx);
+	host_dx() = x;
+	Kokkos::deep_copy(dx, host_dx);
+	return dx;
+}
+/// @brief Utility function for creating a device-side accessible FLOAT view with value x
+/// @param x the FLOAT to send to the device
+/// @return the device-side view containing x
+DFL create_device_float(FLOAT x){
+	DFL dx("device-side float");
+	auto host_dx = Kokkos::create_mirror_view(dx);
+	host_dx() = x;
+	Kokkos::deep_copy(dx, host_dx);
+	return dx;
+}
 
 
 // FUNCTIONS
@@ -187,7 +220,7 @@ void pull_periodic(const UINT x, const UINT y, const UINT xl, const UINT xr, con
 /// -> Wittmann, Zeiser, Hager, Wellein "Comparison of different propagation steps for lattice Boltzmann methods"
 /// @param f field holding distribution PDF values
 /// @param buf temporary write-only-buffer with dimensions equal to f that gets pointer-swapped at the end
-void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
+void push_periodic(Dst_t& f, Dst_t& buf, DUI &nx, DUI &ny, DFL &om){
 	Kokkos::parallel_for(
 		"push periodic", 
 		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}, {TX, TY}), 
@@ -277,7 +310,7 @@ void push_periodic(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 }
 
 
-void pull_periodic_no_mpi(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
+void pull_periodic_no_mpi(Dst_t& f, Dst_t& buf, DUI &nx, DUI &ny, DFL &om){
 	Kokkos::parallel_for(
 		"pull periodic", 
 		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}, {TX, TY}), 
@@ -295,7 +328,7 @@ void pull_periodic_no_mpi(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om){
 	);
 }
 
-void pull_periodic_inner(Dst_t& f, Dst_t& buf, SFL &om, UINT LX, UINT LY, UINT HX, UINT HY){
+void pull_periodic_inner(Dst_t& f, Dst_t& buf, DFL &om, UINT LX, UINT LY, UINT HX, UINT HY){
 	Kokkos::parallel_for(
 		"pull periodic", 
 		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({LX, LY}, {HX, HY}, {TX, TY}), 
@@ -313,7 +346,7 @@ void pull_periodic_inner(Dst_t& f, Dst_t& buf, SFL &om, UINT LX, UINT LY, UINT H
 }
 
 
-void pull_periodic_outer(Dst_t& f, Dst_t& buf, SFL &om, SUI &nx, SUI &ny){
+void pull_periodic_outer(Dst_t& f, Dst_t& buf, DFL &om, DUI &nx, DUI &ny){
 	// pull values on the ring defined by x=LX OR x=HX or y=LY or y=HY
 	// without touching corners twice
 	// -> 4x 1D launch of small kernels for each edge 
@@ -347,7 +380,7 @@ void pull_periodic_outer(Dst_t& f, Dst_t& buf, SFL &om, SUI &nx, SUI &ny){
 	);
 }
 
-void push_lid_driven(Dst_t& f, Dst_t& buf, SUI &nx, SUI &ny, SFL &om, SFL &rho_eq, SFL &u_lid){
+void push_lid_driven(Dst_t& f, Dst_t& buf, DUI &nx, DUI &ny, DFL &om, DFL &rho_eq, DFL &u_lid){
 	Kokkos::parallel_for(
 		"push interior", 
 		Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left, Kokkos::Iterate::Left>>({0, 0}, {NX, NY}, {TX, TY}),
@@ -523,18 +556,27 @@ FLOAT f_eq(FLOAT ux, FLOAT uy, FLOAT rho_i, UINT dir){
 	);
 }
 
-void init_shearwave(Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, UINT HX, UINT HY, SUI &ylow, SUI &yhigh){
+void init_shearwave(Dst_t &f, DFL &rho_init, DFL &u, DUI &y_below, DUI &y_glob){
+	// determine limits of the MDRange depending on whether a halo is used
+	const UINT LX {USE_MPI ? (UINT)1 : (UINT)0};
+	const UINT LY {USE_MPI ? (UINT)1 : (UINT)0};
+	const UINT HX {USE_MPI ? NX-1 : NX};
+	const UINT HY {USE_MPI ? NY-1 : NY};
+	// pass indicator of whether to account for halo to device-side
+	DUI use_mpi = create_device_uint(USE_MPI ? 1:0); 
+
     Kokkos::parallel_for(
 		"initialize", 
 		Kokkos::MDRangePolicy({LX, LY}, {HX, HY}, {TX, TY}), 
 		KOKKOS_LAMBDA(const UINT x, const UINT y){
 			const FLOAT rho_i { rho_init() };  // use initial density
 			// set initial velocities
-			const UINT NY{ny()};
-			const UINT YL{ylow()};
-			const UINT YH{yhigh()};
 			const FLOAT u_init { u() }; 
-			const FLOAT y_scaled { ((FLOAT)(y-YL))/((FLOAT) (YH-YL)) }; // scale y to rank-independent, global y
+			// scale y to rank-independent, global y in [0;1]
+			const FLOAT y_scaled { 
+				((FLOAT)(y - use_mpi() /*account for halo*/ + y_below() /*account for ranks below*/))
+				/ ((FLOAT) (y_glob())) 
+			}; 
 			const FLOAT ux{u_init * SIN(2.0*M_PI * y_scaled)}; // this implements a shear wave
 
 			// set inital distribution to equilibrium distribution
@@ -545,7 +587,7 @@ void init_shearwave(Dst_t &f, SUI &ny, SFL &rho_init, SFL &u, UINT LX, UINT LY, 
 	);
 }
 
-void init_rest(Dst_t &f, SFL &rho_init){
+void init_rest(Dst_t &f, DFL &rho_init){
     Kokkos::parallel_for(
 		"initialize at rest", 
 		Kokkos::MDRangePolicy({0, 0}, {NX, NY}, {TX, TY}), 
@@ -618,8 +660,8 @@ bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY
 			// print all velocities to output stream
 			for (UINT y{LY}; y<HY; ++y){
 				for(UINT x{LX}; x<HX; ++x){
-					const FLOAT ux = VIEW(vel_host,x,y,0);
-					const FLOAT uy = VIEW(vel_host,x,y,1);
+					const FLOAT ux = vel_host(x,y,0);
+					const FLOAT uy = vel_host(x,y,1);
 					const FLOAT out = SQRT(ux*ux+uy*uy);
 					if (out != out){
 						// check for NaNs and abort
@@ -652,7 +694,7 @@ bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY
 			// print all x-components
 			for (UINT y{LY}; y<HY; ++y){
 				for(UINT x{LX}; x<HX; ++x){
-					const FLOAT ux = VIEW(vel_host,x,y,0);
+					const FLOAT ux = vel_host(x,y,0);
 					(*OUT_STREAM) << ux;
 					if (x<HX-1){(*OUT_STREAM) << ",";}
 				}
@@ -662,7 +704,7 @@ bool output(Vel_t &vel, Dst_t &f, Dst_t &buf, UINT LX, UINT LY, UINT HX, UINT HY
 			// print all y-components
 			for (UINT y{LY}; y<HY; ++y){
 				for(UINT x{LX}; x<HX; ++x){
-					const FLOAT uy = VIEW(vel_host,x,y,1);
+					const FLOAT uy = vel_host(x,y,1);
 					(*OUT_STREAM) << uy;
 					if (x<HX-1){(*OUT_STREAM) << ",";}
 				}
@@ -800,7 +842,7 @@ void parse_args(int argc, char *argv[]){
 		OUTPUT = OUTPUT_TYPE::MAX_VEL;
 	} else if (program.is_used("-ov")){
 		OUTPUT = OUTPUT_TYPE::VEL_MAGS;
-	}else if (program.is_used("-ovf")){
+	} else if (program.is_used("-ovf")){
 		OUTPUT = OUTPUT_TYPE::VEL_FIELD;
 	}
 	// the kind of boundary and initial conditions
@@ -812,15 +854,11 @@ void parse_args(int argc, char *argv[]){
 	// mpi usage
 	if (program.is_used("-nmpi")){
 		USE_MPI = false;
-	} else{
-		// add to NX,NY to account for halo
-		NX += 2;
-		NY += 2;
 	}
 }
 
 /// executes kernels that emulate what MPI is supposed to do if there was only a single rank
-void correct_halo_periodic(SUI &nx, SUI &ny, Dst_t &f){
+void correct_halo_periodic(DUI &nx, DUI &ny, Dst_t &f){
 	Kokkos::parallel_for("top/bot exchange", NX-2, KOKKOS_LAMBDA(const UINT x){
 		// top: y=NY-2 -> bot: y=0
 		const UINT NY{ny()};
@@ -857,27 +895,31 @@ void correct_halo_periodic(SUI &nx, SUI &ny, Dst_t &f){
 	});
 }
 
-bool run_simulation_single_node(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
+bool run_simulation_single_node(){
 	// create two buffers for use in two-grid, one-step updates
 	Dst_t f  ("f"  , Q, NY, NX); // only for reading
     Dst_t buf("buf", Q, NY, NX); // only for writing
 	// create buffer for velocity field in case it is needed for output
 	Vel_t vel("vel", NX, NY);
 
+	std::cerr<<"running on"<<NX<<"x"<<NY<<std::endl;
+	// initialize device-side accessible scalar constants
+	DUI nx = create_device_uint(NX);
+	DUI ny = create_device_uint(NY);
+	DFL om = create_device_float(OMEGA);
+	DFL rho_init = create_device_float(RHO_INIT);
+	DFL u = create_device_float(U_INIT);
+
 	// establish initial conditions
 	switch (SCENE){
 		case SCENE_TYPE::LID_DRIVEN:
 			init_rest(f, rho_init); break;
 		default:
-			SUI yl("YL");
-			SUI yh("YH");
-			auto host_yl = Kokkos::create_mirror_view(yl);
-			auto host_yh = Kokkos::create_mirror_view(yh);
-			host_yl() = 0; 		// global y offset: 0
-			host_yh() = NY; 	// global y size: NY
-			Kokkos::deep_copy(yl, host_yl);
-			Kokkos::deep_copy(yh, host_yh);
-			init_shearwave(f, ny, rho_init, u, 0, 0, NX, NY, yl, yh); break;
+			// define additional device-side scalar constants: y-offset and global y size
+			// this is simply 0 and NY for the single-node case
+			DUI y_below = create_device_uint(0);		// global y offset: 0
+			DUI y_glob = create_device_uint(NY);		// global y size: NY
+			init_shearwave(f, rho_init, u, y_below, y_glob); break;
 	}
 
 	// main simulation loop
@@ -908,7 +950,7 @@ bool run_simulation_single_node(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u
 
 }
 
-bool run_simulation_mpi(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
+bool run_simulation_mpi(){
 	// CREATE CARTESIAN COMMUNICATOR
 	// https://wgropp.cs.illinois.edu/courses/cs598-s15/lectures/lecture28.pdf
 	// define a cartesian grid communicator for efficient mapping of virtual to physical topology
@@ -946,6 +988,22 @@ bool run_simulation_mpi(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 	MPI_Cart_rank(grid, nbr_coords[6], &rank_UL);
 	MPI_Cart_rank(grid, nbr_coords[7], &rank_UR);
 
+	// determine the local and global size of the grid, as well as offsets from local to global coordinates
+	const UINT nx_divisor {NX / dims[0]};
+	const UINT nx_remainder {NX % dims[0]};
+	const UINT ny_divisor {NY / dims[1]};
+	const UINT ny_remainder {NY % dims[1]};
+	// remember the global number of nodes along a direction
+	const UINT NY_glob{NY};
+	// - add one node to as many ranks as necessary to get rid of remainders
+	// - also add +2 to account for the halo
+	// - update the existing, global bindings for NX,NY with the rank-local values
+	NX = nx_divisor + ((coords[0] < nx_remainder) ? 1 : 0) + 2;
+	NY = ny_divisor + ((coords[1] < ny_remainder) ? 1 : 0) + 2;
+	std::cerr<<nx_divisor<<" "<<nx_remainder<<" x "<<ny_divisor<<" "<<ny_remainder<<" coords: "<<coords[0]<<" "<<coords[1]<<std::endl;
+	// determine the number of nodes in global coordinates that are below the lowest locally owned node along the y-axis
+	const UINT Y_GLOBAL_BELOW{coords[1] * NY + ((coords[1] >= ny_remainder) ? ny_remainder : 0)};
+
 	// create two buffers for use in two-grid, one-step updates
 	Dst_t f  ("f"  , Q, NY, NX); // only for reading
     Dst_t buf("buf", Q, NY, NX); // only for writing
@@ -953,15 +1011,22 @@ bool run_simulation_mpi(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 	// create buffer for velocity field in case it is needed for output
 	Vel_t vel("vel", NX, NY);
 
+	// initialize device-side accessible scalar constants
+	DUI nx = create_device_uint(NX);
+	DUI ny = create_device_uint(NY);
+	DFL om = create_device_float(OMEGA);
+	DFL rho_init = create_device_float(RHO_INIT);
+	DFL u = create_device_float(U_INIT);
+
 	// prepare MPI buffers, tags and request array
 	Hlo_t top_buf("top halo buffer", (NX-2)*3);
 	Hlo_t bot_buf("bot halo buffer", (NX-2)*3);
 	Hlo_t lft_buf("left halo buffer", (NY-2)*3);
 	Hlo_t rgt_buf("right halo buffer", (NY-2)*3);
-	SFL lt("LT corner");
-	SFL rt("RT corner");
-	SFL lb("LB corner");
-	SFL rb("RB corner");
+	DFL lt("LT corner");
+	DFL rt("RT corner");
+	DFL lb("LB corner");
+	DFL rb("RB corner");
 	// use seperate buffers for sending and receiving on the host side to avoid race conditions and overwrites
 	auto top_buf_send = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, top_buf);
 	auto bot_buf_send = Kokkos::create_mirror_view(Kokkos::DefaultHostExecutionSpace{}, bot_buf);
@@ -998,15 +1063,9 @@ bool run_simulation_mpi(SUI &nx, SUI &ny, SFL &om, SFL &rho_init, SFL &u){
 		case SCENE_TYPE::LID_DRIVEN:
 			init_rest(f, rho_init); break;
 		default:
-			SUI yl("YL");
-			SUI yh("YH");
-			auto host_yl = Kokkos::create_mirror_view(yl);
-			auto host_yh = Kokkos::create_mirror_view(yh);
-			host_yl() = 0; 		// global y offset: 1
-			host_yh() = NY-2; 	// global y size: NY-2
-			Kokkos::deep_copy(yl, host_yl);
-			Kokkos::deep_copy(yh, host_yh);
-			init_shearwave(f, ny, rho_init, u, 1, 1, NX-1, NY-1, yl, yh); break;
+			DUI y_below = create_device_uint(Y_GLOBAL_BELOW); // global y offset: how many nodes are below the rank-local y=0?
+			DUI y_glob = create_device_uint(NY_glob);		  // global y size: how mnay nodes exist globally in y-direction?
+			init_shearwave(f, rho_init, u, y_below, y_glob); break;
 	}
 
 	// main simulation loop
@@ -1212,31 +1271,9 @@ int main(int argc, char *argv[]) {
 	// new scope to make sure deallocation precedes finalize()
 	bool success {true};
 	{
-		// make args visible on device-side
-		SUI nx("NX");
-		SUI ny("NY");
-		SFL om("OMEGA");
-		SFL rho("RHO_INIT");
-		SFL u("U_INIT");
-		auto host_nx = Kokkos::create_mirror_view(nx);
-		auto host_ny = Kokkos::create_mirror_view(ny);
-		auto host_om = Kokkos::create_mirror_view(om);
-		auto host_rho = Kokkos::create_mirror_view(rho);
-		auto host_u = Kokkos::create_mirror_view(u);
-		host_nx() = NX;
-		host_ny() = NY;
-		host_om() = OMEGA;
-		host_rho() = RHO_INIT;
-		host_u() = U_INIT;
-		Kokkos::deep_copy(nx, host_nx);
-		Kokkos::deep_copy(ny, host_ny);
-		Kokkos::deep_copy(om, host_om);
-		Kokkos::deep_copy(u, host_u);
-		Kokkos::deep_copy(rho, host_rho);
-
 		// Run the simulation
 		auto start {std::chrono::high_resolution_clock::now()};
-		success = USE_MPI ? run_simulation_mpi(nx, ny, om, rho, u) : run_simulation_single_node(nx, ny, om, rho, u);
+		success = USE_MPI ? run_simulation_mpi() : run_simulation_single_node();
 		auto end {std::chrono::high_resolution_clock::now()};
 		// print the MLUPS count
 		auto span {std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()};

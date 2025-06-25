@@ -64,5 +64,11 @@ add_executable(
 # include MPI support
 find_package(MPI REQUIRED)
 
-target_link_libraries(main Kokkos::kokkos MPI::MPI_CXX)
+# add an option to pass an optimization level for benchmarks
+option(OPT_LEVEL "Optimization setting to use in the code. Used for benchmarking." 0)
+if (OPT_LEVEL)
+  message(STATUS "Using optimization level ${OPT_LEVEL}.")
+  target_compile_definitions(main PRIVATE OPT=${OPT_LEVEL})
+endif()
 
+target_link_libraries(main Kokkos::kokkos MPI::MPI_CXX)

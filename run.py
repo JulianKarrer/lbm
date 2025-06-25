@@ -27,19 +27,11 @@ DATA_FILE_NAME = "lid-driven"+str(NX)+"x"+str(NY)+"s"+str(TOTAL_STEPS)+".npy"
 subprocess.run(["cmake", "--build", "build"], check=True)
 
 # run the program, get the output
-res = subprocess.run([
-        "./main", 
-        "-nmpi",
-        "-w", str(OMEGA),
-        "-nx", str(NX),
-        "-ny", str(NY),
-        "-of", str(DUMP_EVERY),
-        "-s", str(TOTAL_STEPS+1),
-        "-ov", # output velocity magnitudes
-        # "-ld", # lid driven cavity
-        "-u", str(U_0),
-        "-rho", str(1.0),
-    ], cwd="build",stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,check=False).stdout
+command = f"./main -w {OMEGA} -nx {NX} -ny {NY} -of {DUMP_EVERY} -s {TOTAL_STEPS+1} -u {U_0} -rho 1.0 -ov -nmpi"
+print("command running:", command)
+output = subprocess.run(command.split(" "),cwd="build",stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False)
+print(output.stderr)
+res = output.stdout
 
 # parse the program output into floats
 frames = []
@@ -51,6 +43,7 @@ for step in res.split("#"):
         ...
 print("number of frames:", len(frames))
 frames = np.array(frames)
+print(frames.shape)
 # np.save(DATA_FILE_NAME, frames)
 # frames = np.load(DATA_FILE_NAME)
 # print(frames[10])
@@ -63,13 +56,13 @@ X, Y = np.meshgrid(x, y)
 # settings
 TITLE = str(NX)+"x"+str(NY)+' LB-2DQ9-PBC Shear Wave Decay ('+str(DUMP_EVERY*len(frames))+" steps)"
 CMAP = "Spectral_r"
-LEVELS = 200
+LEVELS = 100
 CBAR_TITLE = r"$\left|\vec{\mathbf{u}}\right|$"
 
 # Initial contour; levels are fixed then
 fig, ax = plt.subplots()
 fig.set_size_inches(12.8, 10.8, forward=True)
-levels = np.linspace(0, U_0, LEVELS)
+levels = np.linspace(0, U_0*1.05, LEVELS)
 contour = ax.contourf(X, Y, frames[0], levels=levels, cmap=CMAP)
 cbar = fig.colorbar(contour, ax=ax)
 cbar.set_label(CBAR_TITLE)
@@ -79,7 +72,7 @@ ax.set_ylabel("y")
 
 def update(frame_idx):
     ax.clear()
-    cf = ax.contourf(X, Y, frames[frame_idx].T, levels=levels, cmap=CMAP)
+    cf = ax.contourf(X, Y, frames[frame_idx], levels=levels, cmap=CMAP)
     ax.set_title(TITLE)
     return cf.collections
 

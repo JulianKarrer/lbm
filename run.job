@@ -1,15 +1,16 @@
 #!/bin/bash -x
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks=4
+#SBATCH --gres=gpu:4
 #SBATCH --time=00:10:00
-#SBATCH -J KokkosLBM
+#SBATCH --job-name KokkosLBM
 #SBATCH --mem=6gb
 #SBATCH --export=ALL
-#SBATCH --partition=multiple
+#SBATCH --partition=gpu_a100_il
 
 module load compiler/gnu mpi/openmpi
 module load toolkit/nvidia-hpc-sdk/25.1
 
-cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON
+cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON
 cmake --build build
-./build/main -nx 8192 -ny 8192 -of 0 -s 1000
+# ./build/main -nx 8192 -ny 8192 -of 0 -s 1000
+mpirun -n 4 ./main -w 0.5 -nx 40000 -ny 40000 -of 100 -s 25_000 -omv
