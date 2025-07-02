@@ -3,11 +3,11 @@ from math import sqrt
 import subprocess
 from datetime import datetime
 
-NX = 30_000
-NY = 30_000
-STEPS = 1000
+NX = 32_000
+NY = 32_000
+STEPS = 100 # (32k)^2, T=100 => 16s
 USE_MPI = False
-REPEATS=10
+REPEATS=5
 
 UNROLL_LOOPS=True
 USE_SINGLE_PRECISION=True
@@ -18,9 +18,9 @@ def compile():
 
 def measure_mlups(args=""):
     if USE_MPI:
-        command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
+        command = f"mpirun --bind-to none --map-by slot -np 1 ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
     else:
-        command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay -nmpi"+args
+        command = f"mpirun --bind-to none --map-by slot -np 1 ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay -nmpi"+args
     print("Command running:", command)
     # run the command repeatedly, collecting MLUPS measurements
     results = []

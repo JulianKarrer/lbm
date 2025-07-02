@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import time
 ti.init(arch=ti.gpu)
 
-NY = 1024
-NX = 1024
+NY = 3000
+NX = 3000
 Q = 9
 OMEGA = 1.7
 RHO = 1.
@@ -311,5 +311,5 @@ def plot_umax():
     plt.show()
 
 
-benchmark(10_000)
-plot_umax()
+benchmark()
+# plot_umax()
