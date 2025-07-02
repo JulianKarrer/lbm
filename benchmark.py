@@ -5,6 +5,10 @@ from datetime import datetime
 
 NX = 32_000
 NY = 32_000
+
+# if 32k x 32k single precision floats fit, then this amount of doubles fit
+DX = int(sqrt(NX*NY/2))
+
 STEPS = 100 # (32k)^2, T=100 => 16s
 REPEATS=5
 
@@ -17,7 +21,10 @@ def compile():
     subprocess.run(["cmake", "--build", "build", "--parallel"], check=True)
 
 def measure_mlups(args=""):
-    command = f"mpirun --bind-to none --map-by slot -np 1 ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
+    if USE_MPI:
+        command = f"mpirun --bind-to none --map-by slot -np 1 ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
+    else:
+        command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
     print("Command running:", command)
     # run the command repeatedly, collecting MLUPS measurements
     results = []
@@ -70,9 +77,7 @@ if __name__=="__main__":
 
     # run with double precision
     USE_SINGLE_PRECISION = False
-    new_size = int(sqrt((NX*NY)/2.)) # account for doubles taking up more space
-    print(f"doubles: use {new_size} grid")
-    NX,NY = new_size, new_size
+    NX,NY = DX, DX
     overwrite_macros()
     compile()
     pull_double, pull_double_stddev = measure_mlups()
