@@ -71,9 +71,6 @@ inline std::ostream* OUT_STREAM{&std::cout};
 /// OUT_STREAM relies on this to have a static lifetime so the stream is not destructed before the program terminates.
 inline std::ofstream OUT_FILE;
 
-/// @brief Whether or not MPI is currently being used. If MPI is not used, use a more performant version for single GPUs.
-inline bool USE_MPI {true};
-
 /// @brief Whether to use a push-type streaming pattern instead of the default pull pattern.
 inline bool PUSH {false};
 

@@ -88,11 +88,6 @@ void parse_args(int argc, char *argv[]){
 	sim_type.add_argument("-ld", "--lid-driven-cavity")
 		.help("Simulate a lid driven cavity with bounce-back solid walls and a moving wall at the top, where the fluid is initially at rest.")
 		.implicit_value(true);
-	// enable/disable MPI usage
-	program
-		.add_argument("-nmpi", "--no-mpi")
-		.help("If specified, refrain from using MPI and halo regions and calculate only on a single process.")
-		.implicit_value(true);
 
 	// parse the arguments
 	try {
@@ -134,10 +129,6 @@ void parse_args(int argc, char *argv[]){
 		SCENE = SCENE_TYPE::LID_DRIVEN;
 	} else {
 		SCENE = SCENE_TYPE::SHEAR_WAVE;
-	}
-	// mpi usage
-	if (program.is_used("-nmpi")){
-		USE_MPI = false;
 	}
 }
 

@@ -918,7 +918,9 @@ bool run_simulation_mpi(){
 // MAIN ENTRY POINT
 
 int main(int argc, char *argv[]) {
+	#if USE_MPI
     MPI_Init(&argc, &argv);
+	#endif
 	// parse command line arguments to adjust NX, NY, OMEGA, ...
 	parse_args(argc, argv);
 	// Initialize Kokkos 
@@ -943,6 +945,8 @@ int main(int argc, char *argv[]) {
 	}
 	(*OUT_STREAM) << std::flush;
     Kokkos::finalize();
+	#if USE_MPI
     MPI_Finalize();
+	#endif
     return success ? 0 : 1;
 }
