@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import time
 ti.init(arch=ti.gpu)
 
-NY = 10_000
-NX = 10_000
+NY = 1024
+NX = 1024
 Q = 9
 OMEGA = 1.7
 RHO = 1.
@@ -249,6 +249,7 @@ def calculate_u_max():
 def step(periodic=True, even=True):
     if periodic:
         push_periodic(f if even else buf, buf if even else f)
+        # push_periodic_simple()
         # push_periodic()
         # f.copy_from(buf)
     else:
@@ -295,7 +296,6 @@ def benchmark(N=1000):
     print(NX*NY*N, "lattice updates in", span*1e-9, "s =>", (NX*NY*N*1_000)//span, "MLUPS" )
 
 
-
 def plot_umax():
     ts = []
     us = []
@@ -311,5 +311,5 @@ def plot_umax():
     plt.show()
 
 
-benchmark(1000)
-# plot_umax()
+benchmark(10_000)
+plot_umax()

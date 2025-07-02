@@ -53,10 +53,13 @@ endif()
 
 # Add argparse
 include_directories(deps)
+include_directories(src)
 
 # Add the main executable and link it against Kokkos
 add_executable(
   main 
+  src/io.cpp
+  src/init.cpp
   src/main.cpp
   deps/argparse/argparse.hpp
 )
