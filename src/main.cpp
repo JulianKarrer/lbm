@@ -545,12 +545,12 @@ void push_lid_driven(Dst_t& f, Dst_t& buf, DUI &nx, DUI &ny, DFL &om, DFL &rho_e
 
 bool run_simulation_single_node(){
 	// create two buffers for use in two-grid, one-step updates
-	#if COALESCING
-		Dst_t f  ("f"  , Q, NY, NX); // only for reading
-		Dst_t buf("buf", Q, NY, NX); // only for writing
-	#else
+	#if !COALESCING
 		Dst_t f  ("f"  , NY, NX, Q); // only for reading
 		Dst_t buf("buf", NY, NX, Q); // only for writing
+	#else
+		Dst_t f  ("f"  , Q, NY, NX); // only for reading
+		Dst_t buf("buf", Q, NY, NX); // only for writing
 	#endif
 	// create buffer for velocity field in case it is needed for output
 	Vel_t vel("vel", NX, NY);

@@ -4,7 +4,7 @@
 
 #define USE_SINGLE_PRECISION true
 #define UNROLL_LOOP true
-#define CONTIGUOUS true
+#define COALESCING true
 #define USE_MPI false
 
 #endif

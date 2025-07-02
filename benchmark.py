@@ -39,7 +39,7 @@ def overwrite_macros():
 
 #define USE_SINGLE_PRECISION {"true" if USE_SINGLE_PRECISION else "false"}
 #define UNROLL_LOOP {"true" if UNROLL_LOOPS else "false"}
-#define CONTIGUOUS {"true" if CONTIGUOUS else "false"}
+#define COALESCING {"true" if CONTIGUOUS else "false"}
 #define USE_MPI {"true" if USE_MPI else "false"}
 
 #endif""")
