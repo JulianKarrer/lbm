@@ -9,6 +9,20 @@
 #include "io.h"
 #include "init.h"
 
+// defaults for macros in macros.h in case something goes wrong
+#ifndef USE_SINGLE_PRECISION
+#define USE_SINGLE_PRECISION true
+#endif
+#ifndef UNROLL_LOOPS
+#define UNROLL_LOOPS true
+#endif
+#ifndef COALESCING
+#define COALESCING true
+#endif
+#ifndef USE_MPI
+#define USE_MPI false
+#endif
+
 
 // FUNCTIONS
 

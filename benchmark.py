@@ -38,7 +38,7 @@ def overwrite_macros():
 #define MACROS_H
 
 #define USE_SINGLE_PRECISION {"true" if USE_SINGLE_PRECISION else "false"}
-#define UNROLL_LOOP {"true" if UNROLL_LOOPS else "false"}
+#define UNROLL_LOOPS {"true" if UNROLL_LOOPS else "false"}
 #define COALESCING {"true" if CONTIGUOUS else "false"}
 #define USE_MPI {"true" if USE_MPI else "false"}
 
@@ -70,6 +70,9 @@ if __name__=="__main__":
 
     # run with double precision
     USE_SINGLE_PRECISION = False
+    new_size = int(sqrt((NX*NY)/2.)) # account for doubles taking up more space
+    print(f"doubles: use {new_size} grid")
+    NX,NY = new_size, new_size
     overwrite_macros()
     compile()
     pull_double, pull_double_stddev = measure_mlups()

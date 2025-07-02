@@ -3,7 +3,7 @@
 #define MACROS_H
 
 #define USE_SINGLE_PRECISION true
-#define UNROLL_LOOP true
+#define UNROLL_LOOPS true
 #define COALESCING true
 #define USE_MPI false
 
