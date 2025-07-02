@@ -1,17 +1,13 @@
 
 from math import sqrt
-import matplotlib.pyplot as plt
 import subprocess
 from datetime import datetime
 
-plt.rcParams.update({"text.usetex": True,})
-plt.rcParams["figure.figsize"] = (4*2.5,3*2.5)
-
-NX = 3000
-NY = 3000
-STEPS = 500
+NX = 30_000
+NY = 30_000
+STEPS = 1000
 USE_MPI = False
-REPEATS=2
+REPEATS=10
 
 UNROLL_LOOPS=True
 USE_SINGLE_PRECISION=True
@@ -21,7 +17,10 @@ def compile():
     subprocess.run(["cmake", "--build", "build", "--parallel"], check=True)
 
 def measure_mlups(args=""):
-    command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay {"" if USE_MPI else "-nmpi"}"+args
+    if USE_MPI:
+        command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
+    else:
+        command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay -nmpi"+args
     print("Command running:", command)
     # run the command repeatedly, collecting MLUPS measurements
     results = []
@@ -85,7 +84,8 @@ if __name__=="__main__":
     overwrite_macros()
 
     # write out results
-    with open(f"benchmark{datetime.now().strftime("%Y_%m_%d_%H:%M:%S")}.results","w") as f:
+    name = datetime.now().strftime("%Y_%m_%d_%H:%M:%S")
+    with open(f"benchmark{name}.results","w") as f:
         f.write(f"""
 pull_unrolled   {pull_unrolled} +- {pull_unrolled_stddev}
 push_unrolled   {push_unrolled} +- {push_unrolled_stddev}
