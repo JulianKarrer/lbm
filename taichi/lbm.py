@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import time
 ti.init(arch=ti.gpu)
 
-NY = 3000
-NX = 3000
+NY = 300
+NX = 300
 Q = 9
 OMEGA = 1.7
 RHO = 1.
@@ -85,9 +85,18 @@ def u(x:int,y:int,rho:ti.f32) -> ti.f32:
 @ti.kernel
 def push_periodic_simple():
     for x, y in ti.ndrange(NX, NY):
-        # compute density and velocity
-        rho_i = rho(x,y)
-        u_i = u(x,y,rho_i)
+        # compute density
+        rho_i = 0.
+        for i in ti.static(range(Q)):
+            rho_i += f[x,y,i]
+
+        # compute velocity
+        u_i = ti.Vector([0.,0.])
+        for i in ti.static(range(Q)):
+            u_i += f[x,y,i] * c[i]
+        u_i /= rho_i
+
+        # for each channel:
         for i in ti.static(range(Q)):
             # collide
             f_eq_i = f[x,y,i] + ti.static(OMEGA) * (f_eq(i,rho_i,u_i) - f[x,y,i])
@@ -255,19 +264,17 @@ def step(periodic=True, even=True):
     else:
         push_lid_driven()
 
-# def run_gui():
-#     gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = True)
-#     init_shearwave()
-#     # init_rest()
-#     while gui.running:
-#         for _ in range(10):
-#             step()
-#             # push_lid_driven()
-#             push_periodic()
-#             f.copy_from(buf)
-#         display_vel()
-#         gui.set_image(pixels)
-#         gui.show()
+def run_gui():
+    gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = True)
+    init_shearwave()
+    # init_rest()
+    while gui.running:
+        for _ in range(100):
+            push_periodic_simple()
+            f.copy_from(buf)
+        display_vel()
+        gui.set_image(pixels)
+        gui.show()
 
 # def run_until_end():
 #     init_shearwave()
@@ -310,6 +317,6 @@ def plot_umax():
     plt.plot(ts, us)
     plt.show()
 
-
-benchmark()
+run_gui()
+# benchmark()
 # plot_umax()

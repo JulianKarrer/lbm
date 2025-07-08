@@ -1,0 +1,582 @@
+---
+title: "The Lattice Boltzmann Method in Kokkos"
+author: "Julian Karrer"
+subtitle: "Performance Lessons Learned"
+lightbox: true
+format:
+  revealjs: 
+    theme: dark
+    transition: fade
+    background-transition: fade
+    chalkboard: true
+    center: true
+  html:
+    include-in-header:
+      - pyscript-header.html
+fontsize: 24pt
+---
+
+
+## 1. Use Less Memory Bandwidth {auto-animate=true}
+
+## Data Dependencies {auto-animate=true}
+<style> 
+    /* pull and push */
+    .aside-footnotes{opacity:0.5; font-size:14pt;}  
+    .bborder{
+        border: solid black 2pt; 
+        position:relative;
+        /* background-image: url(res/bg.png);
+        background-size: contain; */
+        }
+    .bb{
+        border: solid black 1pt; 
+        position:relative;
+        /* background-image: url(res/bg.png);
+        background-size: contain; */
+        }
+    .arrow{
+        position: absolute;  
+        margin: 0 !important; 
+        width: calc(100% / 3.0);
+    }
+    .full-arrow{
+        position: absolute;  
+        width: 100%;
+        height: 100%;
+        top:0;
+        left:0;
+        margin: 0.5px !important; 
+        padding: 0 !important; 
+    }
+    .atr{ top:0; right:0; }
+    .atl{ top:0; left:0; }
+    .abr{ bottom:0; right:0; }
+    .abl{ bottom:0; left:0; }
+    .at { top:0; left:calc(100% / 3.0); }
+    .al { top:calc(100% / 3.0); left:0; }
+    .ar { top:calc(100% / 3.0); right:0; }
+    .ab { bottom:0; left:calc(100% / 3.0); }
+    .ac{left:calc(100% / 3.0); top:calc(100% / 3.0);}
+    .att{ top:0; left:calc(100% / 3.0); }
+    .all{ top:calc(100% / 3.0); left:0; }
+    .arr{ top:calc(100% / 3.0); right:0; }
+    .abb{ bottom:0; left:calc(100% / 3.0); }
+    .adt{left:calc(100% / 3.0); top:calc(100% / 3.0);}
+    .ina{ opacity:0.075; }
+    .span-sm{font-size:15pt; margin-top:3pt;}
+    /* flowchart */
+    .flow-col{
+        display:flex; flex-direction:column; justify-content: space-around; height: 100%; position:relative;
+        /* margin-left:10px; */
+    }
+    .flow-row{
+        height:400px; width:100%; display:flex; flex-direction:row;
+        justify-content: space-around; position: relative;
+        margin-top:50px;
+    }
+    .flow-border{border: 2px solid white; padding:10px; border-radius:10px;}
+    .flow-thin{border: 1px solid #444; padding:10px; border-radius:10px;}
+    .flow-top{position:absolute; top:0;}
+    .flow-bot{position:absolute; bottom:0;}
+    .flow-mid{position:absolute; top:20%;}
+    .arrtip {
+        position:absolute;
+        right:0;
+        bottom:50px;
+        border: solid white;
+        border-width: 0 10px 10px 0;
+        display: inline-block;
+        padding: 10px;
+        transform: rotate(-45deg);
+    }
+    .arrbar {
+        position:absolute;
+        left:0;
+        bottom:60px;
+        width:calc(100% - 15px);
+        background: white;
+        display: inline-block;
+        padding: 5px;
+    }
+</style> 
+
+
+<div class="flow-row" id="flowchart">
+<canvas style="position:absolute; top:0; left:0; width:100%; height:100%" id="flow-canv"> </canvas>
+<div class="flow-col flow-border" data-id="flowfirst">
+<div>$\begin{bmatrix}f_0(\vec{x})\\ f_1(\vec{x})\\ \dots\\ f_8(\vec{x})\end{bmatrix}$</div>
+</div>
+<div class="flow-col">
+<div class="flow-top flow-border" data-id="flow-rho">$\rho(\vec{x})$</div>
+</div>
+<div class="flow-col">
+<div class="flow-bot flow-border" data-id="flow-u">$\vec{u}(\vec{x})$</div>
+</div>
+<div class="flow-col" style="margin-right:50px">
+<div class="flow-mid flow-thin" data-id="flow-feq">$f^{eq}(\vec{x})$</div>
+</div>
+<div class="flow-col flow-border" data-id="flowlast">
+<div>$\begin{bmatrix}f_0(\vec{x}+\Delta\vec{x}_0)\\ f_1(\vec{x}+\Delta\vec{x}_1)\\ \dots\\ f_8(\vec{x}+\Delta\vec{x}_8)\end{bmatrix}$</div>
+</div>
+</div>
+
+
+## Data Dependencies {auto-animate=true}
+<div class="flow-row" id="flowchart2">
+<div class="flow-col flow-border" data-id="flowfirst">
+<div>$\begin{bmatrix}f_0(\vec{x})\\ f_1(\vec{x})\\ \dots\\ f_8(\vec{x})\end{bmatrix}$</div>
+</div>
+<div class="flow-col" style="
+justify-content: flex-start;
+align-items: center;
+">
+<div class="flow-thin" style="width:90px; margin:10px;" data-id="flow-rho">$\rho(\vec{x})$</div>
+<div class="flow-thin" style="width:90px; margin:10px;" data-id="flow-u">$\vec{u}(\vec{x})$</div>
+<div class="flow-thin" style="width:90px; margin:10px;" data-id="flow-feq">$f^{eq}(\vec{x})$</div>
+<div class="arrbar"></div>
+<div class="arrtip"></div>
+<div style="width:200px"></div>
+</div>
+<div class="flow-col flow-border" data-id="flowlast">
+<div>$\begin{bmatrix}f_0(\vec{x}+\Delta\vec{x}_0)\\ f_1(\vec{x}+\Delta\vec{x}_1)\\ \dots\\ f_8(\vec{x}+\Delta\vec{x}_8)\end{bmatrix}$</div>
+</div>
+</div>
+
+
+
+<script>
+// https://stackoverflow.com/questions/808826/drawing-an-arrow-using-html-canvas
+const flowcanv = document.getElementById("flow-canv")
+const flow_ctx = flowcanv.getContext("2d");
+let fh = 500
+let fw = 500
+function draw_flow(){
+    // update canvas size
+    fw = flowcanv.getBoundingClientRect().width
+    fh = flowcanv.getBoundingClientRect().height
+    flowcanv.width = fw
+    flowcanv.height = fh
+    // set line properties
+    flow_ctx.strokeStyle = "white";
+    flow_ctx.lineWidth = 2;
+    flow_ctx.lineCap = "round";
+    // draw arrows
+    flow_ctx.beginPath();
+    canvas_arrow(flow_ctx, 0.22, 0.2, 0.31, 0.1);
+    canvas_arrow(flow_ctx, 0.22, 0.8, 0.41, 0.9);
+    canvas_arrow(flow_ctx, 0.35, 0.2, 0.45, 0.8);
+    canvas_arrow(flow_ctx, 0.48, 0.8, 0.58, 0.4);
+    canvas_arrow(flow_ctx, 0.41, 0.1, 0.52, 0.2);
+    canvas_arrow(flow_ctx, 0.22, 0.65, 0.67, 0.65);
+    canvas_arrow(flow_ctx, 0.63, 0.4, 0.67, 0.5);
+    flow_ctx.stroke();
+}
+function canvas_arrow(context, fromx, fromy, tox, toy) {
+    // scale to fill
+    var fromx = fromx*fw
+    var tox = tox*fw
+    var fromy = fromy*fh
+    var toy = toy*fh
+    // draw arrow
+    var headlen = 10; // length of head in pixels
+    var dx = tox - fromx;
+    var dy = toy - fromy;
+    var angle = Math.atan2(dy, dx);
+    context.moveTo(fromx, fromy);
+    context.lineTo(tox, toy);
+    context.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+    context.moveTo(tox, toy);
+    context.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+}
+window.addEventListener("resize", ()=>{draw_flow()});
+setTimeout(()=>{
+    draw_flow(); 
+    Reveal.on('slidechanged', (event) => {draw_flow()});
+}, 1000);
+
+</script>
+
+
+## Fused Stream-Collide {auto-animate=true auto-animate-unmatched=false}
+
+```{=html}
+<div style="display:flex; flex-direction:row; justify-content: space-around; margin:50px;">
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Pull</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+        margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pushbox">
+            <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="abr"/>
+            </div>
+            <div class="bborder">
+                <img src="res/b.png" class="arrow ab" data-id="ab"/>
+            </div>
+            <div class="bborder">
+                <img src="res/bl.png" class="arrow abl" data-id="abl"/>
+            </div> <div class="bborder">
+                <img src="res/r.png" class="arrow ar" data-id="ar"/>
+            </div> <div class="bborder">
+                <img src="res/dot.png" class="arrow ac" data-id="ac"/>
+            </div> <div class="bborder">
+                <img src="res/l.png" class="arrow al" data-id="al"/>
+            </div> <div class="bborder">
+                <img src="res/tr.png" class="arrow atr" data-id="atr"/>
+            </div> <div class="bborder">
+                <img src="res/t.png" class="arrow at" data-id="at"/>
+            </div> <div class="bborder">
+                <img src="res/tl.png" class="arrow atl" data-id="atl"/>
+            </div>
+        </div>
+        <span class="span-sm">Read from neighbours</span>
+        <span class="span-sm">Write locally</span>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Push</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+            margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pullbox">
+            <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="push-abr">
+                <img src="res/b.png" class="arrow ab" data-id="push-ab"/>
+                <img src="res/bl.png" class="arrow abl" data-id="push-abl"/>
+                <img src="res/r.png" class="arrow ar" data-id="push-ar"/>
+                <img src="res/dot.png" class="arrow ac" data-id="push-ac"/>
+                <img src="res/l.png" class="arrow al" data-id="push-al"/>
+                <img src="res/tr.png" class="arrow atr" data-id="push-atr"/>
+                <img src="res/t.png" class="arrow at" data-id="push-at"/>
+                <img src="res/tl.png" class="arrow atl" data-id="push-atl"/>
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div>
+        </div>
+        <span class="span-sm">Read locally</span>
+        <span class="span-sm">Write to neighbours</span>
+    </div>
+</div>
+```
+
+## Fused Stream-Collide {auto-animate=true auto-animate-unmatched=false}
+
+```{=html}
+<div style="display:flex; flex-direction:row; justify-content: space-around; margin:50px;">
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Pull</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+        margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pushbox">
+            <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="abr"/>
+                <img src="res/b.png" class="arrow ab" data-id="ab" />
+                <img src="res/bl.png" class="arrow abl" data-id="abl"/>
+                <img src="res/r.png" class="arrow ar" data-id="ar"/>
+                <img src="res/dot.png" class="arrow ac" data-id="ac"/>
+                <img src="res/l.png" class="arrow al" data-id="al"/>
+                <img src="res/tr.png" class="arrow atr" data-id="atr"/>
+                <img src="res/t.png" class="arrow at" data-id="at"/>
+                <img src="res/tl.png" class="arrow atl" data-id="atl"/>
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div>
+        </div>
+        <span class="span-sm">Read from neighbours</span>
+        <span class="span-sm">Write locally</span>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Push</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+        margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pullbox">
+            <div class="bborder">
+                <img src="res/tl.png" class="arrow atl" data-id="push-atl"/>
+            </div>
+            <div class="bborder">
+                <img src="res/t.png" class="arrow at" data-id="push-at"/>
+            </div>
+            <div class="bborder">
+                <img src="res/tr.png" class="arrow atr" data-id="push-atr"/>
+            </div> <div class="bborder">
+                <img src="res/l.png" class="arrow al" data-id="push-al"/>
+            </div> <div class="bborder">
+                <img src="res/dot.png" class="arrow ac" data-id="push-ac"/>
+            </div> <div class="bborder">
+                <img src="res/r.png" class="arrow ar" data-id="push-ar"/>
+            </div> <div class="bborder">
+                <img src="res/bl.png" class="arrow abl" data-id="push-abl"/>
+            </div> <div class="bborder">
+                <img src="res/b.png" class="arrow ab" data-id="push-ab"/>
+            </div> <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="push-abr"/>
+            </div>
+        </div>
+        <span class="span-sm">Read locally</span>
+        <span class="span-sm">Write to neighbours</span>
+    </div>
+</div>
+```
+
+## Fused Stream-Collide {auto-animate=true}
+- One-Step, Two-Grid is faster than naïve method^[Wittmann et al. 2012]
+- Two-Step, One-Grid saves memory (A-A, Esoteric Twist)^[Wittmann et al. 2012]
+- Differences between Push and Pull depend on GPU architecture^[Navarro-Hinojosa et al. 2018, Chapter 3.2]
+
+
+
+
+## 2. Use Coalescing Memory Accesses {auto-animate=true}
+<!-- ARRAY OF STRUCTS -->
+
+## Memory Layout {auto-animate=true}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing2.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing3.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing4.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing5.qmd >}}
+
+<!-- STRUCTURE OF ARRAYS -->
+
+## Memory Layout {auto-animate=true}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing2.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing3.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing4.qmd >}}
+
+## Memory Layout {auto-animate=true}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing5.qmd >}}
+
+<!-- ## Loop Unrolling {auto-animate=true}
+<div data-id="loop-unroll">
+```{.cpp}
+float ux{0.};
+float uy{0.};
+constexpr float cx[9] { 0, 1, 0,-1, 0, 1,-1,-1, 1};
+constexpr float cy[9] { 0, 0, 1, 0,-1, 1, 1,-1,-1};
+for (UINT i{0}; i<9; ++i){
+    ux += f[i]*cx[i];
+    uy += f[i]*cy[i];
+}
+ux *= rho_inv;
+uy *= rho_inv;
+```
+</div>
+
+## Loop Unrolling {auto-animate=true}
+<div data-id="loop-unroll">
+```{.cpp}
+const float ux { (f_1 - f_3 + f_5 - f_6 - f_7 + f_8) * rho_inv};
+const float uy {(f_2 - f_4 + f_5 + f_6 - f_7 - f_8) * rho_inv};
+```
+</div> -->
+
+
+## 3. Work while communicating {auto-animate=true}
+
+
+## MPI Communication {auto-animate=true}
+
+{{< include ./mpi-comm.qmd >}}
+
+Communicate each border and corner asynchronously
+
+## MPI Communication {auto-animate=true}
+
+{{< include ./mpi-comm2.qmd >}}
+
+Communicate each border and corner asynchronously
+
+## MPI Communication
+
+{{< include ./mpi-comm3.qmd >}}
+
+$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
+
+## MPI Communication
+
+{{< include ./mpi-comm4.qmd >}}
+
+$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
+
+
+## MPI Communication {auto-animate=true}
+1. Post all `IRecv`
+2. Pack Buffers and `ISend` them
+3. Work on inner nodes during data transfer!
+4. Block **only if** transfer not yet completed
+5. Work on outer nodes
+
+<!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->
+# Taichi {background-video="res/coast-cut.mp4" background-video-loop="true" background-video-muted="true" auto-animate=true}
+
+<!-- <span class="span-sm">Taichi-LBM3D ^[Jianhui Yang, Yi Xu, Liang Yang 2022]</span> -->
+
+## Taichi Features {auto-animate=true auto-animate-unmatched=false}
+- Embedded in Python 
+- Portable, fast, statically typed
+- Layout- and Dimension-independent Code
+- GUI, LAS, Solvers etc. included
+- Differentiable
+
+## Full example {auto-animate=true auto-animate-unmatched=false}
+```{.python}
+# Imports
+import taichi as ti
+import taichi.math as tm 
+
+# Start Taichi
+ti.init(arch=ti.gpu)
+
+# Define constants
+NY = 800
+NX = 800
+Q = 9
+OMEGA = 1.7
+RHO = 1.
+U_0 = 0.1
+w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
+cx = [0,1,0,-1,0,1,-1,-1,1]
+cy = [0,0,1,0,-1,1,1,-1,-1]
+refl = [0,3,4,1,2,7,8,5,6]
+
+# Define fields
+buf = ti.field(dtype=ti.f32, shape=(NX,NY,Q,))
+pixels = ti.Vector.field(n=3, dtype=ti.f32, shape=(NX,NY))
+f = ti.field(ti.f32)
+ti.root.dense(ti.k, Q).dense(ti.ij, (NX,NY)).place(f)
+
+# Initialize a fluid at rest
+@ti.kernel
+def init_rest():
+    for x, y in ti.ndrange(NX, NY):
+        for i in ti.static(range(Q)):
+            f[x,y,i] = w[i] * RHO 
+
+# Fused collide and stream kernel
+@ti.kernel
+def push():
+    for x, y in ti.ndrange(NX, NY):
+        # Compute density
+        rho = 0.
+        for i in ti.static(range(Q)):
+            rho += f[x,y,i]
+
+        # Compute velocity
+        u = ti.Vector([0.,0.])
+        for i in ti.static(range(Q)):
+            u += f[x,y,i] * ti.Vector([cx[i],cy[i]])
+        u /= rho
+
+        # Visualize results
+        pixels[x,y] = tm.length(u)/U_0
+
+        for i in ti.static(range(Q)):
+            # collide
+            f_eq = w[i] * rho * (1 + 3*(ciui := u.x*cx[i]+u.y*cy[i]) + 4.5*ciui*ciui - 1.5*tm.dot(u,u))
+
+            # sliding lid boundary
+            df = ti.static(RHO * U_0 / 6.) * (-1 if i==5 else 1) if (y==NY-1 and (i==5 or i==6)) else 0.
+            i_refl = refl[i] if ((x==0 and cx[i]<0) or (x==NX-1 and cx[i]>0) or (y==0 and cy[i]<0) or (y==NY-1 and cy[i]>0)) else i
+            drx = 0 if (x==0 and cx[i]<0) or (x==NX-1 and cx[i]>0) else cx[i]
+            dry = 0 if (y==0 and cy[i]<0) or (y==NY-1 and cy[i]>0) else cy[i]
+            
+            buf[x+drx, y+dry, i_refl] = f[x,y,i] + ti.static(OMEGA) * (f_eq + df - f[x,y,i])
+
+# Create and run GUI
+def run_gui():
+    gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = True)
+    init_rest()
+    while gui.running:
+        push()
+        f.copy_from(buf)
+        gui.set_image(pixels)
+        gui.show()
+
+run_gui()
+```
+$\leq$ 50 Lines of Code, including GUI
+
+## Full example {auto-animate=true}
+<!-- <div style="display: flex; flex-direction: row; justify-content: center;">
+{{< video ./res/lid-driven.mp4  width="600" height="600" autostart >}}
+</div> -->
+
+<center>
+<video autoplay="true" loop="true" width="500px" style="margin:50px;" controls>
+<source src="./res/lid-driven.mp4"> 
+</video>
+</center>
+
