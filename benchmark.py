@@ -11,20 +11,21 @@ NY = 32_000
 # if 32k x 32k single precision floats fit, then this amount of doubles fit
 DX = int(sqrt(NX*NY/2))
 
-STEPS = 1000 # (32k)^2, T=100 => 16s
-REPEATS = 10
+STEPS = 100 # (32k)^2, T=100 => 16s
+REPEATS = 5
 
 UNROLL_LOOPS=True
 USE_SINGLE_PRECISION=True
 CONTIGUOUS = True
-USE_MPI = False
+USE_MPI = True
+MPI_PROCESSES = 1
 
 def compile():
     subprocess.run(["cmake", "--build", "build", "--parallel"], check=True)
 
 def measure_mlups(args=""):
     if USE_MPI:
-        command = f"mpirun --bind-to none --map-by slot -np 1 ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
+        command = f"mpirun --bind-to none --map-by {"slot" if MPI_PROCESSES<=1 else "ppr:4:node"} -np {MPI_PROCESSES} ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
     else:
         command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
     print("Command running:", command)

@@ -9,9 +9,13 @@
 
 module load compiler/gnu mpi/openmpi toolkit/nvidia-hpc-sdk/25.1
 
-cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON
+cmake -S . -B build -DKokkos_ARCH_AMPERE90=ON -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON
 # cmake --build build --parallel
 
 python3 benchmark.py
 
 # mpirun --bind-to none --map-by slot -np 1 ./build/main -nx 30000 -ny 30000 -of 500 -s 25000 -omv -f results.save
+
+# mpirun --bind-to none --map-by ppr:4:node -np 2 ./build/main -nx 10000 -ny 10000 -of 100 -s 25000 -omv -f results.save
+
+# salloc --partition=dev_gpu_a100_il --gpus-per-node=2 --time=20 --tasks-per-node=2
