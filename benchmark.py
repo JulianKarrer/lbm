@@ -18,14 +18,14 @@ UNROLL_LOOPS=True
 USE_SINGLE_PRECISION=True
 CONTIGUOUS = True
 USE_MPI = True
-MPI_PROCESSES = 1
+MPI_PROCESSES = 2
 
 def compile():
     subprocess.run(["cmake", "--build", "build", "--parallel"], check=True)
 
 def measure_mlups(args=""):
     if USE_MPI:
-        command = f"mpirun --bind-to none --map-by {"slot" if MPI_PROCESSES<=1 else "ppr:4:node"} -np {MPI_PROCESSES} ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
+        command = f"mpirun --bind-to none --map-by ppr:4:node -np {MPI_PROCESSES} ./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
     else:
         command = f"./main -nx {NX} -ny {NY} -of {0} -s {STEPS} --shear-wave-decay"+args
     print("Command running:", command)
@@ -109,4 +109,3 @@ push_rolled     {push_rolled[0]}   +- {push_rolled[1]}, min {push_rolled[2]}, ma
 pull_double     {pull_double[0]}   +- {pull_double[1]}, min {pull_double[2]}, max {pull_double[3]}
 push_double     {push_double[0]}   +- {push_double[1]}, min {push_double[2]}, max {push_double[3]}
 """)
-

@@ -1,7 +1,7 @@
 #!/bin/bash -x
-#SBATCH --ntasks=1
-#SBATCH --gres=gpu:1
-#SBATCH --time=00:15:00
+#SBATCH --ntasks=8
+#SBATCH --gres=gpu:8
+#SBATCH --time=00:10:00
 #SBATCH --job-name KokkosLBM
 #SBATCH --mem=6gb
 #SBATCH --export=ALL
@@ -9,13 +9,17 @@
 
 module load compiler/gnu mpi/openmpi toolkit/nvidia-hpc-sdk/25.1
 
-cmake -S . -B build -DKokkos_ARCH_AMPERE90=ON -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON
-# cmake --build build --parallel
+# cmake -S . -B build -DKokkos_ARCH_AMPERE90=ON -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON
 
-python3 benchmark.py
+cmake --build build --parallel
+
+# python3 benchmark.py
 
 # mpirun --bind-to none --map-by slot -np 1 ./build/main -nx 30000 -ny 30000 -of 500 -s 25000 -omv -f results.save
-
-# mpirun --bind-to none --map-by ppr:4:node -np 2 ./build/main -nx 10000 -ny 10000 -of 100 -s 25000 -omv -f results.save
+for i in 1 2 3 4 5
+do
+   time mpirun --bind-to none --map-by ppr:4:node -np 8 ./build/main -nx 256000 -ny 256000 -of 0 -s 100
+done
+# mpirun --bind-to none --map-by ppr:4:node -np 2 ./build/main -nx 10000 -ny 10000 -of 100 -s 25000 -omv -f results2proc.save # 
 
 # salloc --partition=dev_gpu_a100_il --gpus-per-node=2 --time=20 --tasks-per-node=2

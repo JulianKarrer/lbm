@@ -61,28 +61,6 @@ def add_grid(init, pref, exch=False, d=0, inner=False, draw_arrows=True):
                 -1 if (b or br or bl) else 
                 0
             ))
-            # if tl:
-            #     active = [False]*9
-            #     active[0] = True
-            # if bl:
-            #     active = [False]*9
-            #     active[6] = True
-            # if tr:
-            #     active = [False]*9
-            #     active[2] = True
-            # if br:
-            #     active = [False]*9
-            #     active[-1] = True
-            # decide colours
-            # cc967a
-            # ccbe7a
-            # becc7a
-            # 7acca3
-            # 8fc2cc
-            # 8fadcc
-            # 998fcc
-            # bd8fcc
-            # 8c8c8c
             color = (
                 "#ddd" if outer and d>0 else (
                 "#8fadcc" if (t or b) else (
@@ -105,9 +83,30 @@ def add_grid(init, pref, exch=False, d=0, inner=False, draw_arrows=True):
                             ((active[i] and r and "r" in names[i]) or 
                             (active[i] and l and "l" in names[i]))
                             else color)
+                    idh = f"asdf{x}{y}{i}"
+                    if active[i]:
+                        if "l" in name or "r" in name:
+                            idh = f"{pref}{name}{y}"
+
+                        if "t" in name and t and not exch:
+                            idh = f"t{pref}{name}{x}"
+                        if "t" in name and b and exch:
+                            idh = f"t{not pref}{name}{x}"
+                        
+                        if "b" in name and b and not exch:
+                            idh = f"b{pref}{name}{x}"
+                        if "b" in name and t and exch:
+                            idh = f"b{not pref}{name}{x}"
+                        # if "r" in name or "l" in name:
+                        #     idh = f"{pref}{name}{y}"
+                        # elif ("t" in name or "b" in name) and (t or b):
+                        #     idh = f"{not pref if exch else pref}{name}{x}"
+                        # else:
+                        #     idh = "?"
                     res += f"<img src='res/{name}.png' style='background: {color_inner};' class='arrow a{name} {"" if active[i] else "ina"}' {
-                        ""
-                        # (f"data-id='{pref if t or b else (not pref)}{shift(x+dx) if exch else x}{shift(y+dy) if exch else y}+'") if active[i] else ""
+                        # ""
+                        (f"data-id='{idh}'") 
+                        if active[i] else ""
                     }/>"
             res+="</div>"
     res += """
@@ -127,8 +126,8 @@ with open("mpi-comm.qmd", "w") as f:
 
 # write second file
 res = head
-res = add_grid(res, False, exch=True)
 res = add_grid(res, True, exch=True)
+res = add_grid(res, False, exch=True)
 res += bot
 
 with open("mpi-comm2.qmd", "w") as f:
