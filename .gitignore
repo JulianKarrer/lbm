@@ -9,3 +9,7 @@
 *.results
 *.out
 *.res
+*frame*.png
+!vortex-street.mp4
+!lid-driven.mp4
+!coast-cut.mp4

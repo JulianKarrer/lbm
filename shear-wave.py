@@ -12,10 +12,10 @@ plt.rcParams["figure.figsize"] = (4*2.5,3*2.5)
 # compile the program
 subprocess.run(["cmake", "--build", "build", "--parallel"], check=True)
 
-DUMP_EVERY = 100
-NX = 256
-NY = 256
-TOTAL_STEPS = 25_000
+DUMP_EVERY = 500
+NX = 1000
+NY = 1000
+TOTAL_STEPS = 200_000
 OMEGA_STEPS = 5
 OMEGAS = [(1./OMEGA_STEPS)*i for i in range(1,OMEGA_STEPS+1)]
 RANKS = 1
@@ -54,10 +54,11 @@ ax_om_nu_err.set_yscale("log")
 
 measured_nus = []
 nu_from_omega = lambda omega:(1./3.)*(1./omega - 0.5)
+decays = []
 
 for omega in OMEGAS:
     # run the program, get the output
-    command = f"{f"mpirun -n {RANKS} " if RANKS>1 else ""}./main -w {omega} -nx {NX} -ny {NY} -of {DUMP_EVERY} -s {TOTAL_STEPS} -omv{" -nmpi" if RANKS<=1 else ""}"
+    command = f"{f"mpirun -n {RANKS} " if RANKS>1 else ""}./main -w {omega} -nx {NX} -ny {NY} -of {DUMP_EVERY} -s {TOTAL_STEPS} -omv"
     print("command running:", command)
     output = subprocess.run(command.split(" "), cwd="build",stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False)
     res = output.stdout
@@ -86,6 +87,7 @@ for omega in OMEGAS:
 
     # plot the expected and measured velocity amplitude evolution
     ax_max.plot(ts, max_us, label=r"$\omega = "+'{:3.2f}'.format(omega)+r"$")
+    decays += [{"ts":ts, "max_us":max_us, "omega":omega}]
     # ax_max.plot(ts, [exp(t,a0_fit, measured_nu, c_fit) for t in ts], "--", label=r"fit ($\omega = "+str(omega)+r"$)")
     # ax_max.plot(ts, max_us, label=r"data ($\omega = "+str(omega)+r"$)")
 
@@ -93,6 +95,10 @@ for omega in OMEGAS:
 ax_om_nu.plot(OMEGAS, [nu_from_omega(om) for om in OMEGAS], "-r", label="expected viscosity")
 ax_om_nu.scatter(OMEGAS, measured_nus, label="measured viscosity")
 ax_om_nu_err.plot(OMEGAS, [abs(nu_from_omega(om)-nu) for (om,nu) in zip(OMEGAS, measured_nus)])
+
+print("expected\n",[nu_from_omega(om) for om in OMEGAS])
+print("measured\n",measured_nus)
+print("decays",decays)
 
 # save the plots to disk
 ax_max.legend()

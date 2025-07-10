@@ -1,6 +1,14 @@
 from math import sqrt
 import numpy as np
 import matplotlib.pyplot as plt
+plt.rcParams.update({
+    "text.usetex": True,
+})
+
+from matplotlib.ticker import MaxNLocator
+ax = plt.figure().gca()
+ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
 
 UPDATES = [
     102412800400,
@@ -65,6 +73,8 @@ weak_scaling_errors = [
 
 plt.title("Weak Scaling")
 plt.errorbar(CORES, weak_scaling, weak_scaling_errors, fmt='o-')
+plt.xlabel(r"Number of Processes $N$")
+plt.ylabel(r"Weak Scaling ratio $\frac{T_N}{N \cdot T_1}$")
 plt.show()
 
 
@@ -73,3 +83,4 @@ print("MINS", mins)
 print("MAXS", maxs)
 print("DEVS", stddev)
 print("WEAK SCALING", weak_scaling)
+print("WEAK SCALING ERRORS", weak_scaling_errors)

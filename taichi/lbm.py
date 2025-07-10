@@ -6,12 +6,19 @@ import matplotlib.pyplot as plt
 import time
 ti.init(arch=ti.gpu)
 
-NY = 300
-NX = 300
+NY = 1000
+NX = 1000
 Q = 9
-OMEGA = 1.7
+OMEGA = 1.8
 RHO = 1.
-U_0 = 0.1
+U_0 = 0.05
+
+SPHERE_FRAC = 0.05
+SPHERE_X = 0.1
+
+COLOR_REDUCE = 0.5
+COLOR_CUTOFF = 1e-20
+SAVE_IMAGES = True
 
 w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
 cx = [0,1,0,-1,0,1,-1,-1,1]
@@ -181,6 +188,51 @@ def push_lid_driven():
             # stream
             buf[x+drx, y+dry, i_refl] = f_eq_i + df
 
+@ti.kernel
+def push_vortex():
+    for x, y in ti.ndrange(NX, NY):
+        # compute density and velocity
+        rho_i = rho(x,y)
+        u_i = u(x,y,rho_i)
+        for i in ti.static(range(Q)):
+            # collide
+            ciui = tm.dot(u_i, ti.Vector([ti.static(cx)[i], ti.static(cy)[i]]))
+            f_eq_i = ti.static(w)[i] * rho_i * (1 + 3*ciui + 4.5*ciui*ciui - 1.5*tm.dot(u_i,u_i))
+            f_eq_i = f[x,y,i] + ti.static(OMEGA) * (f_eq_i - f[x,y,i])
+
+            drx = ti.static(cx)[i]
+            dry = ti.static(cy)[i]
+
+            # inlet:
+            if x==0:
+                f_eq_i = f_eq(i, rho_i, ti.Vector([ti.static(U_0), 0.]))
+            # # outlet
+            # if x==NX-1 and drx<0:
+            #     f_eq_i = f[x-1,y,i]
+
+            # keep inside domain and reflect channel if applicable
+            i_refl = ti.static(refl)[i] if (
+                # (x==0 and drx<0) or 
+                # (x==NX-1 and drx>0) or 
+                (y==0 and dry<0) or 
+                (y==NY-1 and dry>0)
+            ) else i
+            # drx = 0 if (x==0 and drx<0) or (x==NX-1 and drx>0) else drx
+            dry = 0 if (y==0 and dry<0) or (y==NY-1 and dry>0) else dry
+
+            xn = x + drx
+            yn = y + dry
+            dx = ti.cast(xn, ti.f32) - NX * ti.static(SPHERE_X)
+            dy = ti.cast(yn, ti.f32) - NY * 0.5
+            if dx*dx + dy*dy < (NY * ti.static(SPHERE_FRAC))**2:
+                # full bounce‑back
+                buf[x, y, ti.static(refl)[i]] = f[x, y, i]
+            else:
+                buf[(xn+NX)%NX, (yn+NY)%NY, i_refl] = f_eq_i
+            
+            # # stream
+            # buf[(x+drx+NX)%NX, (y+dry+NY)%NY, i_refl] = f_eq_i
+
 @ti.func 
 def colour_map(col:ti.float32) -> ti.types.vector(3, ti.float32): 
     x = 1.0-col
@@ -243,10 +295,13 @@ def colour_map(col:ti.float32) -> ti.types.vector(3, ti.float32):
 def display_vel():
     for x, y in ti.ndrange(NX, NY):
         rho_i = rho(x,y)
-        u_mag_i = tm.length(u(x,y,rho_i)) / U_0
+        u_mag_i = tm.length(u(x,y,rho_i)) / U_0 * ti.static(COLOR_REDUCE)
         u_mag[x,y] = u_mag_i
         colour = colour_map(u_mag_i)
-        pixels[x,y] = colour
+        if u_mag_i<ti.static(COLOR_CUTOFF):
+            pixels[x,y] = ti.Vector([0,0,0])
+        else:
+            pixels[x,y] = colour
 
 @ti.kernel
 def calculate_u_max():
@@ -265,16 +320,24 @@ def step(periodic=True, even=True):
         push_lid_driven()
 
 def run_gui():
-    gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = True)
-    init_shearwave()
-    # init_rest()
+    gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = not SAVE_IMAGES)
+    # init_shearwave()
+    init_rest()
+    t = 0
     while gui.running:
-        for _ in range(100):
-            push_periodic_simple()
+        for _ in range(50):
+            push_vortex()
+            # push_lid_driven()
+            # push_periodic_simple()
             f.copy_from(buf)
         display_vel()
         gui.set_image(pixels)
-        gui.show()
+        if SAVE_IMAGES:
+            filename = f'frame_{t:05d}.png'
+            gui.show(filename)
+        else:
+            gui.show()
+        t += 1
 
 # def run_until_end():
 #     init_shearwave()
@@ -289,7 +352,7 @@ def run_gui():
 # if __name__ == "__main__":
 #     run_gui()
 
-def benchmark(N=1000):
+def benchmark(N=10000):
     init_shearwave()
     step(True, True)
     step(True, False)
@@ -317,6 +380,6 @@ def plot_umax():
     plt.plot(ts, us)
     plt.show()
 
-run_gui()
-# benchmark()
+# run_gui()
+benchmark()
 # plot_umax()
