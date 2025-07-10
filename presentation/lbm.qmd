@@ -539,10 +539,16 @@ setTimeout(()=>{
 ## Results - Push vs. Pull {auto-animate=true}
 ::: {.center-xy}
 
-<div id="pull-push" class="plot-div">
+<div id="pull-push" class="plot-div" style="height:400px">
 <!-- <span class="x-label">Number of Processes $N$</span> -->
 <span class="x-label">Lattice Updates per Second $\left[\frac{1}{\sec}\right]$</span>
 </div>
+
+<span style="position: relative;
+  top: 60px;
+  text-align: center;
+  width: 100%;
+  display: inline-block;">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span>
 
 ```{=html}
 <script>
@@ -595,7 +601,7 @@ setTimeout(()=>{
         const layout = {
             template: 'plotly_dark',
             width: plot_width,
-            height: plot_height,
+            height: 400,
             font: { size: 18, color: 'white', family: 'Degular', },
             plot_bgcolor: '#191919',
             paper_bgcolor: '#191919',
@@ -909,8 +915,11 @@ $\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
 
 - Factor of two for variety of hardware
 
+## Thank you for your attention!
+
+
 <!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->
-# Taichi {background-video="res/coast-cut.mp4" background-video-loop="true" background-video-muted="true" auto-animate=true}
+# Bonus: Taichi {background-video="res/coast-cut.mp4" background-video-loop="true" background-video-muted="true" auto-animate=true}
 
 <!-- <span class="span-sm">Taichi-LBM3D ^[Jianhui Yang, Yi Xu, Liang Yang 2022]</span> -->
 

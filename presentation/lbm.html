@@ -97,7 +97,7 @@
     code span.vs { color: #abe338; } /* VerbatimString */
     code span.wa { color: #dcc6e0; } /* Warning */
   </style>
-  <link rel="stylesheet" href="lbm_files/libs/revealjs/dist/theme/quarto-6177165a6556f68649942f858f726412.css">
+  <link rel="stylesheet" href="lbm_files/libs/revealjs/dist/theme/quarto-bc9a6017bff37531389cfaa95813d895.css">
   <link href="lbm_files/libs/revealjs/plugin/quarto-line-highlight/line-highlight.css" rel="stylesheet">
   <link href="lbm_files/libs/revealjs/plugin/reveal-menu/menu.css" rel="stylesheet">
   <link href="lbm_files/libs/revealjs/plugin/reveal-menu/quarto-menu.css" rel="stylesheet">
@@ -736,10 +736,15 @@ setTimeout(()=>{
 <section id="results---push-vs.-pull" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Results - Push vs.&nbsp;Pull</h2>
 <div class="center-xy">
-<div id="pull-push" class="plot-div">
+<div id="pull-push" class="plot-div" style="height:400px">
 <!-- <span class="x-label">Number of Processes $N$</span> -->
 <p><span class="x-label">Lattice Updates per Second <span class="math inline">\(\left[\frac{1}{\sec}\right]\)</span></span></p>
 </div>
+<p><span style="position: relative;
+  top: 60px;
+  text-align: center;
+  width: 100%;
+  display: inline-block;">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span></p>
 <script>
     {   
         const yCats = ['Push', 'Pull'];
@@ -790,7 +795,7 @@ setTimeout(()=>{
         const layout = {
             template: 'plotly_dark',
             width: plot_width,
-            height: plot_height,
+            height: 400,
             font: { size: 18, color: 'white', family: 'Degular', },
             plot_bgcolor: '#191919',
             paper_bgcolor: '#191919',
@@ -1409,11 +1414,14 @@ setTimeout(()=>{
 <ul>
 <li>Factor of two for variety of hardware</li>
 </ul>
+</section>
+<section id="thank-you-for-your-attention" class="slide level2 center">
+<h2>Thank you for your attention!</h2>
 <!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->
 </section></section>
 <section>
-<section id="taichi" class="title-slide slide level1 center" data-background-video="res/coast-cut.mp4" data-background-video-loop="true" data-background-video-muted="true" data-auto-animate="true">
-<h1 data-id="quarto-animate-title">Taichi</h1>
+<section id="bonus-taichi" class="title-slide slide level1 center" data-background-video="res/coast-cut.mp4" data-background-video-loop="true" data-background-video-muted="true" data-auto-animate="true">
+<h1 data-id="quarto-animate-title">Bonus: Taichi</h1>
 <!-- <span class="span-sm">Taichi-LBM3D ^[Jianhui Yang, Yi Xu, Liang Yang 2022]</span> -->
 </section>
 <section id="taichi-features" class="slide level2 center" data-auto-animate="true" data-auto-animate-unmatched="false">

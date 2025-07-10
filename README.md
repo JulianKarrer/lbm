@@ -6,7 +6,7 @@ Setup
 ```bash
 cmake -S . -B build
 ```
-For the A100 nodes on the BWUniCluster use `cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON` to avoid missing auto-detection of the target architecture. 
+For the A100 nodes on the BWUniCluster use `cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON` to avoid missing auto-detection of the target architecture. For H100, try `-DKokkos_ARCH_HOPPER90=ON`. On NEMO2 with MI300A, `CMAKE_PREFIX_PATH=/opt/rocm CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -S . -B build -DKokkos_ARCH_AMD_GFX942_APU=ON -DKokkos_ENABLE_HIP=ON` might be appropriate.
 
 Compile 
 ```bash
@@ -19,7 +19,7 @@ Adjust `Kokkos_ENABLE_CUDA` etc. in `CMakeLists.txt` for HIP/SYCL/...
 ## Command Line Options
 
 ```
-Usage: lbm [--help] [--version] --x-grid-points VAR --y-grid-points VAR --output-frequency VAR --steps VAR --omega VAR --density VAR --initial-velocity VAR --x-grid-points VAR --y-grid-points VAR [--push] [[--output-max-vel]|[--output-velocity]|[--output-velocity-field]] [--file VAR] [[--shear-wave-decay]|[--lid-driven-cavity]] [--no-mpi]
+Usage: lbm [--help] [--version] --x-grid-points VAR --y-grid-points VAR --output-frequency VAR --steps VAR --omega VAR --density VAR --initial-velocity VAR --x-grid-points VAR --y-grid-points VAR [--push] [[--output-max-vel]|[--output-velocity]|[--output-velocity-field]] [--file VAR] [[--shear-wave-decay]|[--lid-driven-cavity]]
 
 Optional arguments:
   -h, --help                     shows help message and exits
@@ -40,7 +40,6 @@ Optional arguments:
   -f, --file                     Specify a filename to write to instead of printing output to std::cout
   -sw, --shear-wave-decay        Simulate a shear-wave decay with velocities in x-direction and periodic boundaries. This is the default.
   -ld, --lid-driven-cavity       Simulate a lid driven cavity with bounce-back solid walls and a moving wall at the top, where the fluid is initially at rest.
-  -nmpi, --no-mpi                If specified, refrain from using MPI and halo regions and calculate only on a single process.
 ```
 
 ## Taichi version
