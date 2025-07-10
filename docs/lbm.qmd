@@ -1,0 +1,950 @@
+---
+title: "The Lattice Boltzmann Method in Kokkos"
+author: "Julian Karrer"
+subtitle: "Performance Lessons Learned"
+lightbox: true
+format:
+  revealjs: 
+    theme: [dark, custom.scss]
+    transition: fade
+    background-transition: fade
+    auto-animate-duration: 0.75
+    chalkboard: true
+    center: true
+    # https://github.com/quarto-dev/quarto-cli/discussions/2951
+    include-in-header: 
+      text: |
+        <style>
+        .center-xy {
+            margin: 0;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translateX(-50%);  
+            z-index: -1;
+        }
+        .center-h1 {
+            margin: 0;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);  
+            z-index: -1;
+        }
+        </style>
+  html:
+    include-in-header:
+      - pyscript-header.html
+fontsize: 24pt
+---
+
+# {background-video="res/vortex-street.mp4" background-video-loop="true" background-video-muted="true" auto-animate="true"}
+
+::: {.center-xy}
+<h1 style="background: #0003;padding: 50px;border-radius: 30px;">Correctness</h1>
+:::
+
+## Shearwave decay {auto-animate="true"}
+
+
+<script src="./res/plotly.js"></script>
+<style> 
+    /* pull and push */
+    .aside-footnotes{opacity:0.5; font-size:14pt;}  
+    .bborder{
+        border: solid black 2pt; 
+        position:relative;
+        /* background-image: url(res/bg.png);
+        background-size: contain; */
+        }
+    .bb{
+        border: solid black 1pt; 
+        position:relative;
+        /* background-image: url(res/bg.png);
+        background-size: contain; */
+        }
+    .arrow{
+        position: absolute;  
+        margin: 0 !important; 
+        width: calc(100% / 3.0);
+    }
+    .full-arrow{
+        position: absolute;  
+        width: 100%;
+        height: 100%;
+        top:0;
+        left:0;
+        margin: 0.5px !important; 
+        padding: 0 !important; 
+    }
+    .atr{ top:0; right:0; }
+    .atl{ top:0; left:0; }
+    .abr{ bottom:0; right:0; }
+    .abl{ bottom:0; left:0; }
+    .at { top:0; left:calc(100% / 3.0); }
+    .al { top:calc(100% / 3.0); left:0; }
+    .ar { top:calc(100% / 3.0); right:0; }
+    .ab { bottom:0; left:calc(100% / 3.0); }
+    .ac{left:calc(100% / 3.0); top:calc(100% / 3.0);}
+    .att{ top:0; left:calc(100% / 3.0); }
+    .all{ top:calc(100% / 3.0); left:0; }
+    .arr{ top:calc(100% / 3.0); right:0; }
+    .abb{ bottom:0; left:calc(100% / 3.0); }
+    .adt{left:calc(100% / 3.0); top:calc(100% / 3.0);}
+    .ina{ opacity:0.075; }
+    .span-sm{font-size:15pt; margin-top:3pt;}
+    /* flowchart */
+    .flow-col{
+        display:flex; flex-direction:column; justify-content: space-around; height: 100%; position:relative;
+        /* margin-left:10px; */
+    }
+    .flow-row{
+        height:400px; width:100%; display:flex; flex-direction:row;
+        justify-content: space-around; position: relative;
+        margin-top:50px;
+    }
+    .flow-border{border: 2px solid white; padding:10px; border-radius:10px;}
+    .flow-thin{border: 1px solid #444; padding:10px; border-radius:10px;}
+    .flow-top{position:absolute; top:0;}
+    .flow-bot{position:absolute; bottom:0;}
+    .flow-mid{position:absolute; top:20%;}
+    .arrtip {
+        position:absolute;
+        right:0;
+        bottom:50px;
+        border: solid white;
+        border-width: 0 10px 10px 0;
+        display: inline-block;
+        padding: 10px;
+        transform: rotate(-45deg);
+    }
+    .arrbar {
+        position:absolute;
+        left:0;
+        bottom:60px;
+        width:calc(100% - 15px);
+        background: white;
+        display: inline-block;
+        padding: 5px;
+    }
+    /* plots */
+    .plot-div{
+        width:900; height:500; position:relative;
+    }
+    .x-label{
+        /* font-family: Helvetica, Arial, serif;   */
+        font-size: 18pt;
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+    .y-label{
+        /* font-family: Helvetica, Arial, serif;   */
+        font-size: 18pt;
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateX(-60%) rotate(270deg);
+    }
+    .plot-description{
+        /* font-family: Helvetica, Arial, serif; */
+        font-size: 14pt;
+        position: absolute;
+        bottom: -100px;
+        opacity: 0.5;
+        width: 100%;
+        text-align: center;
+  }
+</style> 
+<script>const plot_width=900; const plot_height=500;</script>
+
+
+::: {.center-xy}
+
+<div id="vel-decay" class="plot-div">
+<span class="x-label">Time Steps</span>
+<span class="y-label">Velocity Amplitude</span>
+</div>
+<span class="plot-description">200k time steps of D2Q9 shearwave decay with $u_x(t=0)=0.1$, $\omega \in \left\{k\in ℕ_1^5\,|\, \frac{1}{k}\right\}$ on $1000\times 1000$ nodes<span>
+
+:::
+
+```{=html}
+<script>
+{{< include ./decays.js >}}
+</script>
+
+<script>
+
+    {   
+        const data = decays.map((decay)=>{
+            return {
+                x: decay["ts"],
+                y: decay["max_us"],
+                mode: 'lines',
+                type: 'scatter',
+                name: "ω = "+decay["omega"]
+            };
+        });
+        
+        const layout = {
+            template: 'plotly_dark',
+            width: plot_width,
+            height: plot_height,
+            font: { size: 18, color: 'white', family: 'Degular', },
+            plot_bgcolor: '#191919',
+            paper_bgcolor: '#191919',
+            margin: { l: 100, b: 50 },
+            xaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                showgrid: true,
+                gridcolor: '#666',
+                gridwidth: 0.5,
+            },
+            yaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                tickmode: 'array',
+            },
+            barmode: 'group',
+        };
+
+        Plotly.newPlot('vel-decay', data, layout, {
+            displayModeBar: false
+        });
+    };
+</script>
+```
+
+
+## Shearwave decay {auto-animate="true"}
+
+::: {.center-xy}
+
+<div id="vis-pred" class="plot-div">
+<span class="x-label">Relaxation Coefficient $\omega$</span>
+<span class="y-label">Viscosity $\nu$</span>
+</div>
+<span class="plot-description">200k time steps of D2Q9 shearwave decay with $u_x(t=0)=0.1$, $\omega \in \left\{k\in ℕ_1^5\,|\, \frac{1}{k}\right\}$ on $1000\times 1000$ nodes<span>
+
+:::
+```{=html}
+<script>
+
+    {   
+        const data = [
+            {
+                x: [0.2,0.4,0.6,0.8,1.0],
+                y: [1.5, 0.6666666666666666, 0.38888888888888884, 0.25, 0.16666666666666666],
+                mode: 'lines',
+                type: 'scatter',
+                name: "expected"
+            },
+            {
+                x: [0.2,0.4,0.6,0.8,1.0],
+                y: [1.5048586074546788, 0.6666098701443113, 0.38890746336516135, 0.25026651573759884, 0.16693353597245097],
+                mode: 'markers',
+                type: 'scatter',
+                name: "measured"
+            },
+        ];
+        
+        const layout = {
+            template: 'plotly_dark',
+            width: plot_width,
+            height: plot_height,
+            font: { size: 18, color: 'white', family: 'Degular', },
+            plot_bgcolor: '#191919',
+            paper_bgcolor: '#191919',
+            margin: { l: 100, b: 50 },
+            xaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                showgrid: true,
+            },
+            yaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                tickmode: 'array',
+            },
+            barmode: 'group',
+        };
+
+        Plotly.newPlot('vis-pred', data, layout, {
+            displayModeBar: false
+        });
+    };
+</script>
+```
+
+
+## 1. Efficiently use Memory Bandwidth {auto-animate=true}
+
+## Data Dependencies {auto-animate=true}
+
+<div class="flow-row" id="flowchart">
+<canvas style="position:absolute; top:0; left:0; width:100%; height:100%" id="flow-canv"> </canvas>
+<div class="flow-col flow-border" data-id="flowfirst">
+<div>$\begin{bmatrix}f_0(\vec{x})\\ f_1(\vec{x})\\ \dots\\ f_8(\vec{x})\end{bmatrix}$</div>
+</div>
+<div class="flow-col">
+<div class="flow-top flow-border" data-id="flow-rho">$\rho(\vec{x})$</div>
+</div>
+<div class="flow-col">
+<div class="flow-bot flow-border" data-id="flow-u">$\vec{u}(\vec{x})$</div>
+</div>
+<div class="flow-col" style="margin-right:50px">
+<div class="flow-mid flow-thin" data-id="flow-feq">$f^{eq}(\vec{x})$</div>
+</div>
+<div class="flow-col flow-border" data-id="flowlast">
+<div>$\begin{bmatrix}f_0(\vec{x}+\Delta\vec{x}_0)\\ f_1(\vec{x}+\Delta\vec{x}_1)\\ \dots\\ f_8(\vec{x}+\Delta\vec{x}_8)\end{bmatrix}$</div>
+</div>
+</div>
+
+
+## Data Dependencies {auto-animate=true}
+<div class="flow-row" id="flowchart2">
+<div class="flow-col flow-border" data-id="flowfirst">
+<div>$\begin{bmatrix}f_0(\vec{x})\\ f_1(\vec{x})\\ \dots\\ f_8(\vec{x})\end{bmatrix}$</div>
+</div>
+<div class="flow-col" style="
+justify-content: flex-start;
+align-items: center;
+">
+<div class="flow-thin" style="width:80px; margin:10px;" data-id="flow-rho">$\rho(\vec{x})$</div>
+<div class="flow-thin" style="width:80px; margin:10px;" data-id="flow-u">$\vec{u}(\vec{x})$</div>
+<div class="flow-thin" style="width:100px; margin:10px;" data-id="flow-feq">$f^{eq}(\vec{x})$</div>
+<div class="arrbar"></div>
+<div class="arrtip"></div>
+<div style="width:200px"></div>
+</div>
+<div class="flow-col flow-border" data-id="flowlast">
+<div>$\begin{bmatrix}f_0(\vec{x}+\Delta\vec{x}_0)\\ f_1(\vec{x}+\Delta\vec{x}_1)\\ \dots\\ f_8(\vec{x}+\Delta\vec{x}_8)\end{bmatrix}$</div>
+</div>
+</div>
+
+
+<script>
+// https://stackoverflow.com/questions/808826/drawing-an-arrow-using-html-canvas
+const flowcanv = document.getElementById("flow-canv")
+const flow_ctx = flowcanv.getContext("2d");
+let fh = 500
+let fw = 500
+function draw_flow(){
+    // update canvas size
+    fw = flowcanv.getBoundingClientRect().width
+    fh = flowcanv.getBoundingClientRect().height
+    flowcanv.width = fw
+    flowcanv.height = fh
+    // set line properties
+    flow_ctx.strokeStyle = "white";
+    flow_ctx.lineWidth = 2;
+    flow_ctx.lineCap = "round";
+    // draw arrows
+    flow_ctx.beginPath();
+    canvas_arrow(flow_ctx, 0.22, 0.2, 0.31, 0.1);
+    canvas_arrow(flow_ctx, 0.22, 0.8, 0.41, 0.9);
+    canvas_arrow(flow_ctx, 0.35, 0.2, 0.45, 0.8);
+    canvas_arrow(flow_ctx, 0.48, 0.8, 0.58, 0.4);
+    canvas_arrow(flow_ctx, 0.41, 0.1, 0.52, 0.2);
+    canvas_arrow(flow_ctx, 0.22, 0.65, 0.67, 0.65);
+    canvas_arrow(flow_ctx, 0.63, 0.4, 0.67, 0.5);
+    flow_ctx.stroke();
+}
+function canvas_arrow(context, fromx, fromy, tox, toy) {
+    // scale to fill
+    var fromx = fromx*fw
+    var tox = tox*fw
+    var fromy = fromy*fh
+    var toy = toy*fh
+    // draw arrow
+    var headlen = 10; // length of head in pixels
+    var dx = tox - fromx;
+    var dy = toy - fromy;
+    var angle = Math.atan2(dy, dx);
+    context.moveTo(fromx, fromy);
+    context.lineTo(tox, toy);
+    context.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+    context.moveTo(tox, toy);
+    context.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+}
+window.addEventListener("resize", ()=>{draw_flow()});
+setTimeout(()=>{
+    draw_flow(); 
+    Reveal.on('slidechanged', (event) => {draw_flow()});
+}, 1000);
+
+</script>
+
+
+## Fused Stream-Collide {auto-animate=true auto-animate-unmatched=false}
+
+```{=html}
+<div style="display:flex; flex-direction:row; justify-content: space-around; margin:50px;">
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Pull</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+        margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pushbox">
+            <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="abr"/>
+            </div>
+            <div class="bborder">
+                <img src="res/b.png" class="arrow ab" data-id="ab"/>
+            </div>
+            <div class="bborder">
+                <img src="res/bl.png" class="arrow abl" data-id="abl"/>
+            </div> <div class="bborder">
+                <img src="res/r.png" class="arrow ar" data-id="ar"/>
+            </div> <div class="bborder">
+                <img src="res/dot.png" class="arrow ac" data-id="ac"/>
+            </div> <div class="bborder">
+                <img src="res/l.png" class="arrow al" data-id="al"/>
+            </div> <div class="bborder">
+                <img src="res/tr.png" class="arrow atr" data-id="atr"/>
+            </div> <div class="bborder">
+                <img src="res/t.png" class="arrow at" data-id="at"/>
+            </div> <div class="bborder">
+                <img src="res/tl.png" class="arrow atl" data-id="atl"/>
+            </div>
+        </div>
+        <span class="span-sm">Read from neighbours</span>
+        <span class="span-sm">Write locally</span>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Push</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+            margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pullbox">
+            <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="push-abr">
+                <img src="res/b.png" class="arrow ab" data-id="push-ab"/>
+                <img src="res/bl.png" class="arrow abl" data-id="push-abl"/>
+                <img src="res/r.png" class="arrow ar" data-id="push-ar"/>
+                <img src="res/dot.png" class="arrow ac" data-id="push-ac"/>
+                <img src="res/l.png" class="arrow al" data-id="push-al"/>
+                <img src="res/tr.png" class="arrow atr" data-id="push-atr"/>
+                <img src="res/t.png" class="arrow at" data-id="push-at"/>
+                <img src="res/tl.png" class="arrow atl" data-id="push-atl"/>
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div>
+        </div>
+        <span class="span-sm">Read locally</span>
+        <span class="span-sm">Write to neighbours</span>
+    </div>
+</div>
+```
+
+## Fused Stream-Collide {auto-animate=true auto-animate-unmatched=false}
+
+```{=html}
+<div style="display:flex; flex-direction:row; justify-content: space-around; margin:50px;">
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Pull</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+        margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pushbox">
+            <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="abr"/>
+                <img src="res/b.png" class="arrow ab" data-id="ab" />
+                <img src="res/bl.png" class="arrow abl" data-id="abl"/>
+                <img src="res/r.png" class="arrow ar" data-id="ar"/>
+                <img src="res/dot.png" class="arrow ac" data-id="ac"/>
+                <img src="res/l.png" class="arrow al" data-id="al"/>
+                <img src="res/tr.png" class="arrow atr" data-id="atr"/>
+                <img src="res/t.png" class="arrow at" data-id="at"/>
+                <img src="res/tl.png" class="arrow atl" data-id="atl"/>
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div> <div class="bborder">
+            </div>
+        </div>
+        <span class="span-sm">Read from neighbours</span>
+        <span class="span-sm">Write locally</span>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center;">
+        <h5>Push</h5>
+        <div style="
+        width: 400px;
+        aspect-ratio:1;
+        margin: 0;
+        margin-left:auto;
+        margin-right:auto;
+        grid-template-columns: 1fr 1fr 1fr;
+        display: grid;
+        position:relative;
+        background: #eee;" data-id="pullbox">
+            <div class="bborder">
+                <img src="res/tl.png" class="arrow atl" data-id="push-atl"/>
+            </div>
+            <div class="bborder">
+                <img src="res/t.png" class="arrow at" data-id="push-at"/>
+            </div>
+            <div class="bborder">
+                <img src="res/tr.png" class="arrow atr" data-id="push-atr"/>
+            </div> <div class="bborder">
+                <img src="res/l.png" class="arrow al" data-id="push-al"/>
+            </div> <div class="bborder">
+                <img src="res/dot.png" class="arrow ac" data-id="push-ac"/>
+            </div> <div class="bborder">
+                <img src="res/r.png" class="arrow ar" data-id="push-ar"/>
+            </div> <div class="bborder">
+                <img src="res/bl.png" class="arrow abl" data-id="push-abl"/>
+            </div> <div class="bborder">
+                <img src="res/b.png" class="arrow ab" data-id="push-ab"/>
+            </div> <div class="bborder">
+                <img src="res/br.png" class="arrow abr" data-id="push-abr"/>
+            </div>
+        </div>
+        <span class="span-sm">Read locally</span>
+        <span class="span-sm">Write to neighbours</span>
+    </div>
+</div>
+```
+
+
+## Results - Push vs. Pull {auto-animate=true}
+::: {.center-xy}
+
+<div id="pull-push" class="plot-div" style="height:400px">
+<!-- <span class="x-label">Number of Processes $N$</span> -->
+<span class="x-label">Lattice Updates per Second $\left[\frac{1}{\sec}\right]$</span>
+</div>
+
+<span style="position: relative;
+  top: 60px;
+  text-align: center;
+  width: 100%;
+  display: inline-block;">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span>
+
+```{=html}
+<script>
+    {   
+        const yCats = ['Push', 'Pull'];
+        const yBase = [0, 1];
+
+        gpuNames = ["3060Ti", "A100", "H100"]
+        pushs = [2975.6781898284266e6, 19417.16863052674e6, 28175.800587975507e6]
+        pulls = [2956.481874510256e6, 20249.84516021208e6, 28603.662947854602e6, ]
+        err_push = [13.089266398514473e6,42.292797248931876e6,8.159538454552164e6]
+        err_pull = [9.795412811200736e6, 899.2927193996135e6, 7.147837461444218e6]
+
+        const tracePush = {
+            type: 'bar',
+            orientation: 'h',
+            name: 'Push',
+            x: pushs,
+            y: gpuNames,
+            error_x: {
+                type: 'data',
+                array: err_push,
+                visible: true,
+                thickness: 1,
+                width: 20,
+                color: '#ddd'
+            },
+            marker: { color: 'lightblue' },
+        };
+
+        const tracePull = {
+            type: 'bar',
+            orientation: 'h',
+            name: 'Pull',
+            x: pulls,
+            y: gpuNames,
+            error_x: {
+                type: 'data',
+                array: err_pull,
+                visible: true,
+                thickness: 1,
+                width: 20,
+                color: '#ddd'
+            },
+            // marker: { color: 'blue' },
+        };
+
+        const data = [tracePull, tracePush];
+
+        const layout = {
+            template: 'plotly_dark',
+            width: plot_width,
+            height: 400,
+            font: { size: 18, color: 'white', family: 'Degular', },
+            plot_bgcolor: '#191919',
+            paper_bgcolor: '#191919',
+            margin: { l: 100, b: 50 },
+            xaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                showgrid: true,
+                gridcolor: '#666',
+                gridwidth: 0.5,
+            },
+            yaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                tickmode: 'array',
+            },
+            barmode: 'group',
+        };
+
+        Plotly.newPlot('pull-push', data, layout, {
+            displayModeBar: false
+        });
+    }
+</script>
+```
+<span class="plot-description">A100 and H100 (32000 $\times$ 32000), 3060Ti (3000 $\times$ 3000), 100 steps, $\geq$ 5 repeats, D2Q9 Shearwave Decay<span>
+:::
+
+## Fused Stream-Collide {auto-animate=true}
+- One-Step, Two-Grid is recommended^[Wittmann et al. 2012]
+- Two-Step, One-Grid saves memory (A-A, Esoteric Twist)
+- Differences between Push and Pull depend on GPU architecture^[Navarro-Hinojosa et al. 2018, Chapter 3.2]
+
+| GPU |  Method | Speedup rel. | Speedup abs. |
+|:---------:|:-----:|:------:|:------:|
+| 3060Ti  | Push | $0.65\%$ | 19 MLUPS  | 
+| A100    | Pull | $4.3\%$  | 830 MLUPS |  
+| H100    | Pull | $1.5\%$  | 430 MLUPS |  
+
+## 2. Use Coalescing Memory Accesses {auto-animate=true}
+<!-- ARRAY OF STRUCTS -->
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing2.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing3.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing4.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Array of Structs - uncoalesced
+
+{{< include ./aos-packing5.qmd >}}
+
+<!-- STRUCTURE OF ARRAYS -->
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing2.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing3.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing4.qmd >}}
+
+## Memory Layout {auto-animate=true auto-animate-duration=0.5}
+Struct of Arrays - coalesced
+
+{{< include ./soa-packing5.qmd >}}
+
+
+## Results - Coalescing Accesses {auto-animate=true}
+::: {.center-xy}
+
+<div id="aos-soa" class="plot-div">
+<!-- <span class="x-label">Number of Processes $N$</span> -->
+<span class="x-label">Lattice Updates per Second $\left[\frac{1}{\sec}\right]$</span>
+</div>
+
+```{=html}
+<script>
+    {   
+        const yCats = ['coalesced', 'uncoalesced'];
+        const yBase = [0, 1];
+        const gpuNames = ["3060 Ti", "A100", "H100"]
+        const coalesced   = [2956.481874510256e6,20249.84516021208e6,28603.662947854602e6];
+        const uncoalesced = [2390.175457634095e6,6873.190050571908e6,13306.991294064826e6];
+        const errCoal = [9.795412811200736e6,899.2927193996135e6,7.147837461444218e6];
+        const errUnc  = [6.415700428839631e6,95.98548628921101e6,172.22660059878717e6];
+
+        const traceCoal = {
+            type: 'bar',
+            orientation: 'h',
+            name: 'Coalesced',
+            x: coalesced,
+            y: gpuNames,
+            error_x: {
+                type: 'data',
+                array: errCoal,
+                visible: true,
+                thickness: 1,
+                width: 20,
+                color:'#ddd'
+            },
+            // marker: { color: 'lightred' },
+        };
+        const traceUnc = {
+            type: 'bar',
+            orientation: 'h',
+            name: 'Uncoalesced',
+            x: uncoalesced,
+            y: gpuNames,
+            error_x: {
+                type: 'data',
+                array: errUnc,
+                visible: true,
+                thickness: 1,
+                width: 20,
+                color:'#ddd'
+            },
+            marker: { color: 'lightblue' },
+        };
+
+        let data = [traceCoal,traceUnc];
+       
+        const layout = {
+            template: 'plotly_dark',
+            width: plot_width,
+            height: plot_height,
+            font: { size: 18, color: 'white', family: 'Degular', },
+            plot_bgcolor: '#191919',
+            paper_bgcolor: '#191919',
+            margin: { l: 100, b: 50 },
+            xaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                showgrid: true,
+                gridcolor: '#666',
+                gridwidth: 0.5,
+            },
+            yaxis: {
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                tickmode: 'array',
+            },
+            barmode: 'group',
+            // bargap: 0.2, // gap between groups
+            // bargroupgap: 0.1, // gap between bars within group
+        };
+
+        Plotly.newPlot('aos-soa', data, layout,{
+            displayModeBar: false
+        });
+    }
+</script>
+```
+<span class="plot-description">Pull scheme, A100 and H100 (32000 $\times$ 32000), 3060Ti (3000 $\times$ 3000), 100 steps, $\geq$ 5 repeats, D2Q9 Shearwave Decay<span>
+:::
+
+## Results - Coalescing Accesses {auto-animate=true}
+
+- Always prioritize coalescing memory accesses!
+
+| GPU  | Speedup rel. | Speedup abs. |
+|:------:|:------:|:------:|
+| 3060Ti  | $24\%$ | 570 MLUPS  | 
+| A100    | $195\%$  | 13400 MLUPS |  
+| H100    | $115\%$  | 15296 MLUPS |  
+
+
+
+## 3. Work while communicating {auto-animate=true}
+
+
+## MPI Communication {auto-animate=true auto-animate-duration=1.0}
+
+{{< include ./mpi-comm.qmd >}}
+
+Communicate each border and corner asynchronously
+
+## MPI Communication {auto-animate=true auto-animate-duration=1.0}
+
+{{< include ./mpi-comm2.qmd >}}
+
+Communicate each border and corner asynchronously
+
+## MPI Communication
+
+{{< include ./mpi-comm3.qmd >}}
+
+$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
+
+## MPI Communication
+
+{{< include ./mpi-comm4.qmd >}}
+
+$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
+
+
+## MPI Communication {auto-animate=true}
+1. Post all `IRecv`
+2. Pack Buffers and `ISend` them
+3. Work on inner nodes during data transfer!
+4. Block **only if** transfer not yet completed
+5. Work on outer nodes^[The Kokkos Lectures Module 6, Sandia National Laboratories, 2020]
+
+
+## Results - Weak Scaling {auto-animate=true}
+::: {.center-xy}
+
+<div id="weak-scaling-plot" class="plot-div">
+<span class="x-label">Number of Processes $N$</span>
+<span class="y-label">Scaling Efficiency $\frac{T(1)}{T(N)}$</span>
+</div>
+
+```{=html}
+<script>
+    {
+        // Example data
+        const xs = [1, 2, 4, 8];
+        const ys = [1.0, 0.9986878599005695, 0.9895404565891907, 0.9796576024637036];
+        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043, 0.00043811586968390913];
+        const trace = {
+            x: xs,
+            y: ys,
+            mode: 'lines+markers',
+            type: 'scatter',
+            error_y: {
+            type: 'data',
+            array: errors,
+            visible: true
+            }
+        };
+        const data = [trace];
+        const layout = {
+            template: 'plotly_dark',
+            width: plot_width,
+            height: plot_height,
+            font: { size: 18, color: 'white', family: 'Degular', },
+            plot_bgcolor: '#191919',
+            paper_bgcolor: '#191919',
+            margin: { l: 80, b: 50 },
+            xaxis: {
+                type: 'log',
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+                // tickformat: ',d' // integer ticks only
+            },
+            yaxis: {
+                // title: {
+                //     text: '$\\text{Weak Scaling Efficiency }\\frac{N\\cdot T(1)}{T(N)}$', 
+                //     standoff: 100
+                // },
+                titlefont: { color: 'white' },
+                tickfont: { color: 'white' },
+            }
+            };
+
+        Plotly.newPlot('weak-scaling-plot', data, layout,{
+            displayModeBar: false
+        });
+    }
+</script>
+```
+<span class="plot-description">Nvidia A100 GPUs, 32000 $\times$ 32000 nodes per process, 100 steps, 5 repeats, D2Q9 Shearwave Decay<span>
+:::
+
+## 4. Over-optimization and Precision {auto-animate=true}
+
+## Micro-optimizations {auto-animate=true}
+- Don't do NVCC's job:
+    1. Manual Loop-Unrolling
+    2. Common Subexpression Elimination
+    3. Arithmetic Simplification
+    4. Read/Write reordering
+
+**NO** significant difference ($\pm\sigma$) for any tested GPU
+
+## Precision {auto-animate=true}
+- Use `float` instead of `double` if possible!
+
+
+| GPU | relative Speedup for `float` | 
+|:------:|:------:|
+| 3060Ti  | $202\%$ | 
+| H100    | $201\%$ | 
+
+- Factor of two for variety of hardware
+
+## Thank you for your attention!
+
+
+<!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->
+# Bonus: Taichi {background-video="res/coast-cut.mp4" background-video-loop="true" background-video-muted="true" auto-animate=true}
+
+<!-- <span class="span-sm">Taichi-LBM3D ^[Jianhui Yang, Yi Xu, Liang Yang 2022]</span> -->
+
+## Taichi Features {auto-animate=true auto-animate-unmatched=false}
+- Embedded in Python 
+- Portable, fast, statically typed
+- Layout- and Dimension-independent Code
+- GUI, LAS, Solvers etc. included
+- Differentiable
+- Only $\sim 15\%$ performance penalty^[$10^4$ steps, $1000^2$ nodes of D2Q9-PBC on 3060Ti compared to peak of Kokkos (2503 MLUPS vs. 2956 MLUPS)]
+
+## Full example {auto-animate=true auto-animate-unmatched=false}
+```{.python}
+{{< include ./minimal-taichi.py >}}
+```
+$\leq$ 50 Lines of Code, including GUI
+
+## Full example {auto-animate=true}
+<!-- <div style="display: flex; flex-direction: row; justify-content: center;">
+{{< video ./res/lid-driven.mp4  width="600" height="600" autostart >}}
+</div> -->
+
+<center>
+<video autoplay="true" loop="true" width="500px" style="margin:50px;" controls>
+<source src="./res/lid-driven.mp4"> 
+</video>
+</center>
+
