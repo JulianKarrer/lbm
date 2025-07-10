@@ -45,3 +45,6 @@ Optional arguments:
 ## Taichi version
 
 To run the LBM solver in the `taichi` directory, Python 3.10 (see `.python-version`) and `python3 -m pip install taichi numpy matplotlib` are required
+
+## Presentation
+A Quarto/RevealJS presentation of the results is found in the `/docs` folder or on [GitHub Pages](https://juliankarrer.github.io/lbm/)
