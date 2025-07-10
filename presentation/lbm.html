@@ -1320,9 +1320,9 @@ setTimeout(()=>{
 <script>
     {
         // Example data
-        const xs = [1, 2, 4];
-        const ys = [1.0, 0.9986878599005695, 0.9895404565891907];
-        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043];
+        const xs = [1, 2, 4, 8];
+        const ys = [1.0, 0.9986878599005695, 0.9895404565891907, 0.9796576024637036];
+        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043, 0.00043811586968390913];
         const trace = {
             x: xs,
             y: ys,
@@ -1344,9 +1344,10 @@ setTimeout(()=>{
             paper_bgcolor: '#191919',
             margin: { l: 80, b: 50 },
             xaxis: {
+                type: 'log',
                 titlefont: { color: 'white' },
                 tickfont: { color: 'white' },
-                tickformat: ',d' // integer ticks only
+                // tickformat: ',d' // integer ticks only
             },
             yaxis: {
                 // title: {

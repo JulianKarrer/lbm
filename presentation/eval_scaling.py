@@ -13,13 +13,15 @@ ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 UPDATES = [
     102412800400,
     102412800400*2,
-    102412800400*4
+    102412800400*4,
+    102412800400*8,
 ]
 
 CORES=[
     1,
     2,
     4,
+    8,
 ]
 
 TIMES = [
@@ -43,6 +45,13 @@ TIMES = [
         [4939310324,4999479757,5008172495,5020724028],
         [4949603451,4965577201,5021582076,5026432585],
         [4994256410,4983995321,4998276334,5025536895],
+    ],
+    [ # 102412800400*8
+        [5010958006,5010149481,5025617316,5055190613,5068984809,5072055686,5087561597,5079828355,],
+        [4989439009,5024069857,5046808786,5032683631,5048647235,5065839770,5093845968,5082944457,],
+        [5000941679,5015857763,5018362102,5037520155,5078299106,5062737571,5064529740,5084788330,],
+        [4996386805,5020018384,5028669545,5049770886,5035725449,5050344464,5068214484,5094432249,],
+        [4993052680,5028858083,5037914352,5056909851,5057860037,5062013585,5089525306,5077169178,],
     ]
 ]
 
@@ -60,14 +69,14 @@ mins = [np.min(ml) for ml in mlups]
 maxs = [np.max(ml) for ml in mlups]
 stddev = [np.std(ml, ddof=1) for ml in mlups] # Bessel corrected
 stderr = [stddev/np.sqrt(len(ml)) for ml,stddev in zip(mlups,stddev)] # σ / sqrt(N)
-weak_scaling = [avgs[i]/(avgs[0]*CORES[i]) for i in range(n)]
+weak_scaling = [float(avgs[i]/(avgs[0]*CORES[i])) for i in range(n)]
 
 # https://en.wikipedia.org/wiki/Propagation_of_uncertainty 
 # weak_scaling = f = A/B case for ratio in weak scaling, with A=avgs[i], B=avgs[b]
 weak_scaling_errors = [
-    weak_scaling[i] * np.sqrt(
+    float(weak_scaling[i] * np.sqrt(
         (stderr[i]/avgs[i])**2 + (stderr[0]/avgs[0])**2
-    )
+    ))
     for i in range(n)
 ]
 

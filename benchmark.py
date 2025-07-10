@@ -10,15 +10,15 @@ NY = 32_000
 
 # if 32k x 32k single precision floats fit, then this amount of doubles fit
 DX = int(sqrt(NX*NY/2))
-
+print(DX)
 STEPS = 100 # (32k)^2, T=100 => 16s
 REPEATS = 5
 
 UNROLL_LOOPS=True
 USE_SINGLE_PRECISION=True
 CONTIGUOUS = True
-USE_MPI = True
-MPI_PROCESSES = 2
+USE_MPI = False
+MPI_PROCESSES = 1
 
 def compile():
     subprocess.run(["cmake", "--build", "build", "--parallel"], check=True)

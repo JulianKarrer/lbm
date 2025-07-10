@@ -4,8 +4,13 @@ import taichi.math as tm
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+
+
+# INITIALIZE TAICHI
 ti.init(arch=ti.gpu)
 
+
+# CONSTANTS AND SETTINGS
 NY = 1000
 NX = 1000
 Q = 9
@@ -16,23 +21,26 @@ U_0 = 0.05
 SPHERE_FRAC = 0.05
 SPHERE_X = 0.1
 
-COLOR_REDUCE = 0.5
-COLOR_CUTOFF = 1e-20
+COLOUR_REDUCE = 0.5
+COLOUR_CUTOFF = 1e-20
 SAVE_IMAGES = True
 
+
+# LBM CONSTANTS FOR D2Q9
 w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36]
 cx = [0,1,0,-1,0,1,-1,-1,1]
 cy = [0,0,1,0,-1,1,1,-1,-1]
 refl = [0,3,4,1,2,7,8,5,6]
 
-# f = ti.field(dtype=ti.f32, shape=(NX,NY,Q,))
+
+# FIELD DEFINITIONS
 f = ti.field(ti.f32)
 ti.root.dense(ti.k, Q).dense(ti.ij, (NX,NY)).place(f)
+# f = ti.field(dtype=ti.f32, shape=(NX,NY,Q,))
 
 buf = ti.field(dtype=ti.f32, shape=(NX,NY,Q,))
 # buf = ti.field(ti.f32)
 # ti.root.dense(ti.ij, (NX,NY)).dense(ti.k, Q).place(buf)
-
 
 wf = ti.field(dtype=ti.f32, shape=(9,))
 c = ti.Vector.field(n=2, dtype=ti.f32, shape=(9,))
@@ -40,6 +48,11 @@ dr = ti.Vector.field(n=2, dtype=ti.int32, shape=(9,))
 u_max = ti.field(dtype=ti.f64, shape=())
 u_mag = ti.field(dtype=ti.f32, shape=(NX,NY))
 
+u_max = ti.field(dtype=ti.f32, shape=())
+pixels = ti.Vector.field(n=3, dtype=ti.f32, shape=(NX,NY))
+u_mag = ti.field(dtype=ti.f32, shape=(NX,NY))
+
+# INITIALIZE DEVICE-SIDE CONSTANT FIELDS
 wf.from_numpy(np.array([4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36], dtype=np.float32))
 dr.from_numpy(np.array(
     [[0,0],[1,0],[0,1],[-1,0],[0,-1],[1,1],[-1,1],[-1,-1],[1,-1]],
@@ -49,34 +62,37 @@ c.from_numpy(np.array(
     [[0,0],[1,0],[0,1],[-1,0],[0,-1],[1,1],[-1,1],[-1,-1],[1,-1]],
     dtype=np.float32
 ))
-u_max = ti.field(dtype=ti.f32, shape=())
-pixels = ti.Vector.field(n=3, dtype=ti.f32, shape=(NX,NY))
-u_mag = ti.field(dtype=ti.f32, shape=(NX,NY))
 
 @ti.kernel
 def init_shearwave():
+    """Initialize a shearwave velocity profile"""
     for x, y, i in f:
         u = ti.Vector([ti.static(U_0) * tm.sin((2.*tm.pi*y)/ti.cast(NY, ti.f32)), 0.])
         f[x,y,i] = f_eq(i, ti.static(RHO), u)
 
 @ti.kernel
 def init_rest():
+    """Initialize a fluid at rest with density `RHO`"""
     for x, y, i in f:
         f[x,y,i] = f_eq(i, ti.static(RHO), ti.Vector([0., 0.])) # = wf[i] * ti.static(RHO)
 
 @ti.func
 def f_eq(i:int, rho:float, u:ti.template()) -> ti.f32:
+    """Compute the equilibirum distribution for the given channel `i` using density and velocity."""
     ciui = tm.dot(u, c[i])
     return wf[i] * rho * (1 + 3*ciui + 4.5*ciui*ciui - 1.5*tm.dot(u,u))
 
 @ti.func
 def f_eq_opt(w_i:float, f_i:float, rho_i:float, u_i:ti.template(), c_i:ti.template()) -> ti.f32:
+    """A more optimized method to compute the equilibrium distribution. 
+    Takes the channel weight `w_i` as a parameter so it can be made static in the calling scope, saving reads."""
     ciui = tm.dot(u_i, c_i)
     f_eq_i = w_i * rho_i * (1 + 3*ciui + 4.5*ciui*ciui - 1.5*tm.dot(u_i,u_i))
     return f_i + ti.static(OMEGA) * (f_eq_i - f_i)
 
 @ti.func
 def rho(x:int,y:int) -> ti.f32:
+    """Compute the density at the given position"""
     rho = 0.
     for i in ti.static(range(Q)):
         rho += f[x,y,i]
@@ -84,6 +100,7 @@ def rho(x:int,y:int) -> ti.f32:
 
 @ti.func
 def u(x:int,y:int,rho:ti.f32) -> ti.f32:
+    """Compute the velocity at the given position"""
     u = ti.Vector([0.,0.])
     for i in ti.static(range(Q)):
         u += f[x,y,i] * c[i]
@@ -91,6 +108,7 @@ def u(x:int,y:int,rho:ti.f32) -> ti.f32:
 
 @ti.kernel
 def push_periodic_simple():
+    """Simple and readable code for a push-scheme with periodic boundary conditions."""
     for x, y in ti.ndrange(NX, NY):
         # compute density
         rho_i = 0.
@@ -112,6 +130,7 @@ def push_periodic_simple():
 
 @ti.kernel
 def push_periodic(f:ti.template(), buf:ti.template()):
+    """More optimized push kernel that mimics the Kokkos implementation"""
     for x, y in ti.ndrange(NX, NY):
         f_0 = f[x,y,0]
         f_1 = f[x,y,1]
@@ -161,6 +180,7 @@ def push_periodic(f:ti.template(), buf:ti.template()):
 
 @ti.kernel
 def push_lid_driven():
+    """Simple push kernel implementing lid-driven cavity boundary conditions"""
     for x, y in ti.ndrange(NX, NY):
         # compute density and velocity
         rho_i = rho(x,y)
@@ -190,6 +210,7 @@ def push_lid_driven():
 
 @ti.kernel
 def push_vortex():
+    """A push kernel implementing boundary conditions for a vortex street: inlet on the left, periodic on the right, bounce-back on the top, bottom and around a sphere in the domain."""
     for x, y in ti.ndrange(NX, NY):
         # compute density and velocity
         rho_i = rho(x,y)
@@ -235,6 +256,7 @@ def push_vortex():
 
 @ti.func 
 def colour_map(col:ti.float32) -> ti.types.vector(3, ti.float32): 
+    """Maps a scalar to a RGB colour using the Spectral_r colourmap"""
     x = 1.0-col
     # https://github.com/kbinani/colormap-shaders/blob/master/shaders/glsl/IDL_CB-Spectral.frag
     r:ti.float32 = 0.0 # type: ignore
@@ -293,24 +315,27 @@ def colour_map(col:ti.float32) -> ti.types.vector(3, ti.float32):
 
 @ti.kernel
 def display_vel():
+    """Display the velocity field by colour-mapping and writing to the `pixels` buffer for use by the GUI"""
     for x, y in ti.ndrange(NX, NY):
         rho_i = rho(x,y)
-        u_mag_i = tm.length(u(x,y,rho_i)) / U_0 * ti.static(COLOR_REDUCE)
+        u_mag_i = tm.length(u(x,y,rho_i)) / U_0 * ti.static(COLOUR_REDUCE)
         u_mag[x,y] = u_mag_i
         colour = colour_map(u_mag_i)
-        if u_mag_i<ti.static(COLOR_CUTOFF):
+        if u_mag_i<ti.static(COLOUR_CUTOFF):
             pixels[x,y] = ti.Vector([0,0,0])
         else:
             pixels[x,y] = colour
 
 @ti.kernel
 def calculate_u_max():
+    """Simple reduction calculating the maximum velocity magnitude."""
     u_max[None] = 0.
     for x,y in  ti.ndrange(NX, NY):
         rho_i = rho(x,y)
         ti.atomic_max(u_max[None], tm.length(u(x,y,rho_i)))
 
 def step(periodic=True, even=True):
+    """Perform one step, including swapping read/write fields"""
     if periodic:
         push_periodic(f if even else buf, buf if even else f)
         # push_periodic_simple()
@@ -320,16 +345,20 @@ def step(periodic=True, even=True):
         push_lid_driven()
 
 def run_gui():
+    """Run the GUI"""
     gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = not SAVE_IMAGES)
+    # initialize the distribution values
     # init_shearwave()
     init_rest()
     t = 0
     while gui.running:
+        # to speed up progress, do multiple substeps per rendered frame
         for _ in range(50):
             push_vortex()
             # push_lid_driven()
             # push_periodic_simple()
             f.copy_from(buf)
+        # display the velocity magnitudes, colour-coded
         display_vel()
         gui.set_image(pixels)
         if SAVE_IMAGES:
@@ -339,27 +368,20 @@ def run_gui():
             gui.show()
         t += 1
 
-# def run_until_end():
-#     init_shearwave()
-#     for _ in range(10_000):
-#         step()
-#     gui = ti.GUI("LBM D2Q9", res=(NX, NY), fast_gui = True)
-#     while gui.running:
-#         display_vel()
-#         gui.set_image(pixels)
-#         gui.show()
-
-# if __name__ == "__main__":
-#     run_gui()
 
 def benchmark(N=10000):
+    """Benchmark performance in MLUPS"""
+    # run each kernel once so JIT-compilation is not measured
     init_shearwave()
     step(True, True)
     step(True, False)
+    # start timer
     start = time.perf_counter_ns()
     for t in range(N):
         step(True, t%2==0)
+    # IMPORTANT! sync kernels before stopping time
     ti.sync()
+    # end timer
     end = time.perf_counter_ns()
     span = (end-start)
     print(span)
@@ -367,6 +389,7 @@ def benchmark(N=10000):
 
 
 def plot_umax():
+    """Plot the time evolution of maximum velocity magnitude. Used for shearwave decay analysis."""
     ts = []
     us = []
     init_shearwave()
@@ -380,6 +403,8 @@ def plot_umax():
     plt.plot(ts, us)
     plt.show()
 
-# run_gui()
-benchmark()
-# plot_umax()
+
+if __name__ == "__main__":
+    # run_gui()
+    benchmark()
+    # plot_umax()
