@@ -60,6 +60,7 @@ add_executable(
   main 
   src/io.cpp
   src/init.cpp
+  src/pull-push.cpp
   src/main.cpp
   deps/argparse/argparse.hpp
 )

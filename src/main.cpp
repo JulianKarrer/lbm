@@ -423,7 +423,7 @@ int main(int argc, char *argv[]) {
 	#if USE_MPI
 		bool success = run_simulation_mpi();
 	#else 
-		bool success =run_simulation_single_node();
+		bool success = run_simulation_single_node();
 	#endif
 	auto end {std::chrono::high_resolution_clock::now()};
 	// print the MLUPS count
