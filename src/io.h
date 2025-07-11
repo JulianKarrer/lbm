@@ -2,7 +2,10 @@
 #define IO_H
 #include "global.h"
 #include "argparse/argparse.hpp"
+
+#if USE_MPI
 #include <mpi.h>
+#endif
 
 /// @brief Parse command line arguments, storing values into the corresponding global variables on the host-side.
 /// Arguments used on the device-side must be moved into buffers subsequently.

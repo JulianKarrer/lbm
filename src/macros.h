@@ -5,6 +5,6 @@
 #define USE_SINGLE_PRECISION true
 #define UNROLL_LOOPS true
 #define COALESCING true
-#define USE_MPI true
+#define USE_MPI false
 
 #endif

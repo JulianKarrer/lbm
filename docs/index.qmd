@@ -41,6 +41,15 @@ fontsize: 24pt
 
 ::: {.center-xy}
 <h1 style="background: #0003;padding: 50px;border-radius: 30px;">Correctness</h1>
+
+<span class="aside-footnotes" style="
+opacity: 1;
+position: absolute;
+bottom: 20px;
+font-size: 12pt;
+width: 100%;
+text-align: center;
+">$1920\times 1080 \,\text{Domain}$ , $\omega=1.7, \vec{u}_x^{\text{inlet}}=0.05$ </span>
 :::
 
 ## Shearwave decay {auto-animate="true"}
@@ -153,7 +162,14 @@ fontsize: 24pt
         opacity: 0.5;
         width: 100%;
         text-align: center;
-  }
+    }
+    .plot-below{
+        position: relative;
+        top: 60px;
+        text-align: center;
+        width: 100%;
+        display: inline-block;
+    }
 </style> 
 <script>const plot_width=900; const plot_height=500;</script>
 
@@ -277,8 +293,33 @@ fontsize: 24pt
 </script>
 ```
 
+## 1. Hand-Tuning and Precision {auto-animate=true}
 
-## 1. Efficiently use Memory Bandwidth {auto-animate=true}
+## Micro-optimizations {auto-animate=true}
+- Don't do NVCC's job:
+    1. Manual Loop-Unrolling
+    2. Common Subexpression Elimination
+    3. Arithmetic Simplification
+    4. Read/Write reordering
+
+**NO** significant difference ($\pm\sigma$) for any tested GPU
+
+- Try optional parameters for small improvements instead
+    - `Kokkos::MDRangePolicy` Tiling `{512, 1}` $\Longrightarrow 1.5\%$ improvement
+
+## Precision {auto-animate=true}
+- Use `float` instead of `double` if possible!
+
+
+| GPU | relative Speedup for `float` | 
+|:------:|:------:|
+| 3060Ti  | $202\%$ | 
+| H100    | $201\%$ | 
+
+- Factor of two for variety of hardware
+
+
+## 2. Efficiently use Memory Bandwidth {auto-animate=true}
 
 ## Data Dependencies {auto-animate=true}
 
@@ -455,6 +496,7 @@ setTimeout(()=>{
     </div>
 </div>
 ```
+<span class="aside-footnotes" style="">[Wittmann et al. 2012]</span>
 
 ## Fused Stream-Collide {auto-animate=true auto-animate-unmatched=false}
 
@@ -534,6 +576,7 @@ setTimeout(()=>{
     </div>
 </div>
 ```
+<span class="aside-footnotes" style="">[Wittmann et al. 2012]</span>
 
 
 ## Results - Push vs. Pull {auto-animate=true}
@@ -544,11 +587,7 @@ setTimeout(()=>{
 <span class="x-label">Lattice Updates per Second $\left[\frac{1}{\sec}\right]$</span>
 </div>
 
-<span style="position: relative;
-  top: 60px;
-  text-align: center;
-  width: 100%;
-  display: inline-block;">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span>
+<span class="plot-below">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span>
 
 ```{=html}
 <script>
@@ -619,6 +658,26 @@ setTimeout(()=>{
                 tickmode: 'array',
             },
             barmode: 'group',
+            annotations: [
+                {
+                    x: ((28175-28603)/2+28603)*1e6,
+                    y: 2.1,
+                    text: '+1.5%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 30,
+                    ay: -40
+                },
+                {
+                    x: ((20249-19417)/2+19417)*1e6,
+                    y: 1.0-0.5,
+                    text: '+4.3%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 30,
+                    ay: 40
+                },
+            ],
         };
 
         Plotly.newPlot('pull-push', data, layout, {
@@ -630,18 +689,18 @@ setTimeout(()=>{
 <span class="plot-description">A100 and H100 (32000 $\times$ 32000), 3060Ti (3000 $\times$ 3000), 100 steps, $\geq$ 5 repeats, D2Q9 Shearwave Decay<span>
 :::
 
-## Fused Stream-Collide {auto-animate=true}
+<!-- ## Fused Stream-Collide {auto-animate=true}
 - One-Step, Two-Grid is recommended^[Wittmann et al. 2012]
 - Two-Step, One-Grid saves memory (A-A, Esoteric Twist)
-- Differences between Push and Pull depend on GPU architecture^[Navarro-Hinojosa et al. 2018, Chapter 3.2]
+- Differences between Push and Pull depend on GPU architecture^[Navarro-Hinojosa et al. 2018, Chapter 3.2] -->
 
-| GPU |  Method | Speedup rel. | Speedup abs. |
+<!-- | GPU |  Method | Speedup rel. | Speedup abs. |
 |:---------:|:-----:|:------:|:------:|
 | 3060Ti  | Push | $0.65\%$ | 19 MLUPS  | 
 | A100    | Pull | $4.3\%$  | 830 MLUPS |  
-| H100    | Pull | $1.5\%$  | 430 MLUPS |  
+| H100    | Pull | $1.5\%$  | 430 MLUPS |   -->
 
-## 2. Use Coalescing Memory Accesses {auto-animate=true}
+## 3. Use Coalescing Memory Accesses {auto-animate=true}
 <!-- ARRAY OF STRUCTS -->
 
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
@@ -649,25 +708,35 @@ Array of Structs - uncoalesced
 
 {{< include ./aos-packing.qmd >}}
 
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
+
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Array of Structs - uncoalesced
 
 {{< include ./aos-packing2.qmd >}}
+
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
 
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Array of Structs - uncoalesced
 
 {{< include ./aos-packing3.qmd >}}
 
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
+
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Array of Structs - uncoalesced
 
 {{< include ./aos-packing4.qmd >}}
 
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
+
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Array of Structs - uncoalesced
 
 {{< include ./aos-packing5.qmd >}}
+
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
 
 <!-- STRUCTURE OF ARRAYS -->
 
@@ -676,25 +745,35 @@ Struct of Arrays - coalesced
 
 {{< include ./soa-packing.qmd >}}
 
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
+
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Struct of Arrays - coalesced
 
 {{< include ./soa-packing2.qmd >}}
+
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
 
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Struct of Arrays - coalesced
 
 {{< include ./soa-packing3.qmd >}}
 
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
+
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Struct of Arrays - coalesced
 
 {{< include ./soa-packing4.qmd >}}
 
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
+
 ## Memory Layout {auto-animate=true auto-animate-duration=0.5}
 Struct of Arrays - coalesced
 
 {{< include ./soa-packing5.qmd >}}
+
+<span class="aside-footnotes" style="">[Navarro-Hinojosa et al. 2018, Chapter 3.2]</span>
 
 
 ## Results - Coalescing Accesses {auto-animate=true}
@@ -704,6 +783,8 @@ Struct of Arrays - coalesced
 <!-- <span class="x-label">Number of Processes $N$</span> -->
 <span class="x-label">Lattice Updates per Second $\left[\frac{1}{\sec}\right]$</span>
 </div>
+
+<!-- <span class="plot-below">$+115\%$ (H100) $\quad$ $+195\%$ (A100) $\quad$ $+24\%$ (3060Ti)</span> -->
 
 ```{=html}
 <script>
@@ -772,8 +853,35 @@ Struct of Arrays - coalesced
                 tickmode: 'array',
             },
             barmode: 'group',
-            // bargap: 0.2, // gap between groups
-            // bargroupgap: 0.1, // gap between bars within group
+            annotations: [
+                {
+                    x: ((28603-13306)/2+13306)*1e6,
+                    y: 2.05,
+                    text: '+115%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 20,
+                    ay: -40
+                },
+                {
+                    x: ((20249-6873)/2+6873)*1e6,
+                    y: 1.05,
+                    text: '+195%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 20,
+                    ay: -40
+                },
+                {
+                    x: ((2956-2390)/2+2390)*1e6,
+                    y: 0.05,
+                    text: '+24%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 20,
+                    ay: -40
+                },
+            ],
         };
 
         Plotly.newPlot('aos-soa', data, layout,{
@@ -785,7 +893,7 @@ Struct of Arrays - coalesced
 <span class="plot-description">Pull scheme, A100 and H100 (32000 $\times$ 32000), 3060Ti (3000 $\times$ 3000), 100 steps, $\geq$ 5 repeats, D2Q9 Shearwave Decay<span>
 :::
 
-## Results - Coalescing Accesses {auto-animate=true}
+<!-- ## Results - Coalescing Accesses {auto-animate=true}
 
 - Always prioritize coalescing memory accesses!
 
@@ -793,11 +901,11 @@ Struct of Arrays - coalesced
 |:------:|:------:|:------:|
 | 3060Ti  | $24\%$ | 570 MLUPS  | 
 | A100    | $195\%$  | 13400 MLUPS |  
-| H100    | $115\%$  | 15296 MLUPS |  
+| H100    | $115\%$  | 15296 MLUPS |   -->
 
 
 
-## 3. Work while communicating {auto-animate=true}
+## 4. Work while communicating {auto-animate=true}
 
 
 ## MPI Communication {auto-animate=true auto-animate-duration=1.0}
@@ -845,9 +953,9 @@ $\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
 <script>
     {
         // Example data
-        const xs = [1, 2, 4, 8];
-        const ys = [1.0, 0.9986878599005695, 0.9895404565891907, 0.9796576024637036];
-        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043, 0.00043811586968390913];
+        const xs = [1, 2, 4, 8, 16];
+        const ys = [1.0, 0.9986878599005695, 0.9895404565891907, 0.9796576024637036, 0.98134753959907];
+        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043, 0.00043811586968390913, 0.0006899703133274674];
         const trace = {
             x: xs,
             y: ys,
@@ -892,28 +1000,6 @@ $\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
 ```
 <span class="plot-description">Nvidia A100 GPUs, 32000 $\times$ 32000 nodes per process, 100 steps, 5 repeats, D2Q9 Shearwave Decay<span>
 :::
-
-## 4. Over-optimization and Precision {auto-animate=true}
-
-## Micro-optimizations {auto-animate=true}
-- Don't do NVCC's job:
-    1. Manual Loop-Unrolling
-    2. Common Subexpression Elimination
-    3. Arithmetic Simplification
-    4. Read/Write reordering
-
-**NO** significant difference ($\pm\sigma$) for any tested GPU
-
-## Precision {auto-animate=true}
-- Use `float` instead of `double` if possible!
-
-
-| GPU | relative Speedup for `float` | 
-|:------:|:------:|
-| 3060Ti  | $202\%$ | 
-| H100    | $201\%$ | 
-
-- Factor of two for variety of hardware
 
 ## Thank you for your attention!
 

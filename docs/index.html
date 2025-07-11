@@ -233,6 +233,14 @@ Julian Karrer
 <h1 style="background: #0003;padding: 50px;border-radius: 30px;">
 Correctness
 </h1>
+<p><span class="aside-footnotes" style="
+opacity: 1;
+position: absolute;
+bottom: 20px;
+font-size: 12pt;
+width: 100%;
+text-align: center;
+"><span class="math inline">\(1920\times 1080 \,\text{Domain}\)</span> , <span class="math inline">\(\omega=1.7, \vec{u}_x^{\text{inlet}}=0.05\)</span> </span></p>
 </div>
 </section>
 <section id="shearwave-decay" class="slide level2 center" data-auto-animate="true">
@@ -344,7 +352,14 @@ Correctness
         opacity: 0.5;
         width: 100%;
         text-align: center;
-  }
+    }
+    .plot-below{
+        position: relative;
+        top: 60px;
+        text-align: center;
+        width: 100%;
+        display: inline-block;
+    }
 </style>
 <script>const plot_width=900; const plot_height=500;</script>
 <div class="center-xy">
@@ -455,8 +470,57 @@ const decays = [{'ts': [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 
     };
 </script>
 </section>
+<section id="hand-tuning-and-precision" class="slide level2 center" data-auto-animate="true">
+<h2 data-id="quarto-animate-title">1. Hand-Tuning and Precision</h2>
+</section>
+<section id="micro-optimizations" class="slide level2 center" data-auto-animate="true">
+<h2 data-id="quarto-animate-title">Micro-optimizations</h2>
+<ul>
+<li>Don’t do NVCC’s job:
+<ol type="1">
+<li>Manual Loop-Unrolling</li>
+<li>Common Subexpression Elimination</li>
+<li>Arithmetic Simplification</li>
+<li>Read/Write reordering</li>
+</ol></li>
+</ul>
+<p><strong>NO</strong> significant difference (<span class="math inline">\(\pm\sigma\)</span>) for any tested GPU</p>
+<ul>
+<li>Try optional parameters for small improvements instead
+<ul>
+<li><code>Kokkos::MDRangePolicy</code> Tiling <code>{512, 1}</code> <span class="math inline">\(\Longrightarrow 1.5\%\)</span> improvement</li>
+</ul></li>
+</ul>
+</section>
+<section id="precision" class="slide level2 center" data-auto-animate="true">
+<h2 data-id="quarto-animate-title">Precision</h2>
+<ul>
+<li>Use <code>float</code> instead of <code>double</code> if possible!</li>
+</ul>
+<table class="caption-top">
+<thead>
+<tr class="header">
+<th style="text-align: center;">GPU</th>
+<th style="text-align: center;">relative Speedup for <code>float</code></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: center;">3060Ti</td>
+<td style="text-align: center;"><span class="math inline">\(202\%\)</span></td>
+</tr>
+<tr class="even">
+<td style="text-align: center;">H100</td>
+<td style="text-align: center;"><span class="math inline">\(201\%\)</span></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Factor of two for variety of hardware</li>
+</ul>
+</section>
 <section id="efficiently-use-memory-bandwidth" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">1. Efficiently use Memory Bandwidth</h2>
+<h2 data-id="quarto-animate-title">2. Efficiently use Memory Bandwidth</h2>
 </section>
 <section id="data-dependencies" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Data Dependencies</h2>
@@ -655,6 +719,7 @@ setTimeout(()=>{
         <span class="span-sm">Write to neighbours</span>
     </div>
 </div>
+<p><span class="aside-footnotes" style="">[Wittmann et al.&nbsp;2012]</span></p>
 </section>
 <section id="fused-stream-collide-1" class="slide level2 center" data-auto-animate="true" data-auto-animate-unmatched="false">
 <h2 data-id="quarto-animate-title">Fused Stream-Collide</h2>
@@ -732,6 +797,7 @@ setTimeout(()=>{
         <span class="span-sm">Write to neighbours</span>
     </div>
 </div>
+<p><span class="aside-footnotes" style="">[Wittmann et al.&nbsp;2012]</span></p>
 </section>
 <section id="results---push-vs.-pull" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Results - Push vs.&nbsp;Pull</h2>
@@ -740,11 +806,7 @@ setTimeout(()=>{
 <!-- <span class="x-label">Number of Processes $N$</span> -->
 <p><span class="x-label">Lattice Updates per Second <span class="math inline">\(\left[\frac{1}{\sec}\right]\)</span></span></p>
 </div>
-<p><span style="position: relative;
-  top: 60px;
-  text-align: center;
-  width: 100%;
-  display: inline-block;">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span></p>
+<p><span class="plot-below">Peak performance: 28.6 BLUPS (H100), 22.0 BLUPS(A100)</span></p>
 <script>
     {   
         const yCats = ['Push', 'Pull'];
@@ -813,6 +875,26 @@ setTimeout(()=>{
                 tickmode: 'array',
             },
             barmode: 'group',
+            annotations: [
+                {
+                    x: ((28175-28603)/2+28603)*1e6,
+                    y: 2.1,
+                    text: '+1.5%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 30,
+                    ay: -40
+                },
+                {
+                    x: ((20249-19417)/2+19417)*1e6,
+                    y: 1.0-0.5,
+                    text: '+4.3%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 30,
+                    ay: 40
+                },
+            ],
         };
 
         Plotly.newPlot('pull-push', data, layout, {
@@ -822,47 +904,18 @@ setTimeout(()=>{
 </script>
 <p><span class="plot-description">A100 and H100 (32000 <span class="math inline">\(\times\)</span> 32000), 3060Ti (3000 <span class="math inline">\(\times\)</span> 3000), 100 steps, <span class="math inline">\(\geq\)</span> 5 repeats, D2Q9 Shearwave Decay<span></span></span></p>
 </div>
+<!-- ## Fused Stream-Collide {auto-animate=true}
+- One-Step, Two-Grid is recommended^[Wittmann et al. 2012]
+- Two-Step, One-Grid saves memory (A-A, Esoteric Twist)
+- Differences between Push and Pull depend on GPU architecture^[Navarro-Hinojosa et al. 2018, Chapter 3.2] -->
+<!-- | GPU |  Method | Speedup rel. | Speedup abs. |
+|:---------:|:-----:|:------:|:------:|
+| 3060Ti  | Push | $0.65\%$ | 19 MLUPS  | 
+| A100    | Pull | $4.3\%$  | 830 MLUPS |  
+| H100    | Pull | $1.5\%$  | 430 MLUPS |   -->
 </section>
-<section id="fused-stream-collide-2" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">Fused Stream-Collide</h2>
-<ul>
-<li>One-Step, Two-Grid is recommended<sup>1</sup></li>
-<li>Two-Step, One-Grid saves memory (A-A, Esoteric Twist)</li>
-<li>Differences between Push and Pull depend on GPU architecture<sup>2</sup></li>
-</ul>
-<table class="caption-top">
-<thead>
-<tr class="header">
-<th style="text-align: center;">GPU</th>
-<th style="text-align: center;">Method</th>
-<th style="text-align: center;">Speedup rel.</th>
-<th style="text-align: center;">Speedup abs.</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: center;">3060Ti</td>
-<td style="text-align: center;">Push</td>
-<td style="text-align: center;"><span class="math inline">\(0.65\%\)</span></td>
-<td style="text-align: center;">19 MLUPS</td>
-</tr>
-<tr class="even">
-<td style="text-align: center;">A100</td>
-<td style="text-align: center;">Pull</td>
-<td style="text-align: center;"><span class="math inline">\(4.3\%\)</span></td>
-<td style="text-align: center;">830 MLUPS</td>
-</tr>
-<tr class="odd">
-<td style="text-align: center;">H100</td>
-<td style="text-align: center;">Pull</td>
-<td style="text-align: center;"><span class="math inline">\(1.5\%\)</span></td>
-<td style="text-align: center;">430 MLUPS</td>
-</tr>
-</tbody>
-</table>
-<aside><ol class="aside-footnotes"><li id="fn1"><p>Wittmann et al.&nbsp;2012</p></li><li id="fn2"><p>Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2</p></li></ol></aside></section>
 <section id="use-coalescing-memory-accesses" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">2. Use Coalescing Memory Accesses</h2>
+<h2 data-id="quarto-animate-title">3. Use Coalescing Memory Accesses</h2>
 <!-- ARRAY OF STRUCTS -->
 </section>
 <section id="memory-layout" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
@@ -886,6 +939,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-1" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -908,6 +962,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-2" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -930,6 +985,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-3" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -952,6 +1008,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-4" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -974,6 +1031,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 <!-- STRUCTURE OF ARRAYS -->
 </section>
 <section id="memory-layout-5" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
@@ -997,6 +1055,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-6" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -1019,6 +1078,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-7" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -1041,6 +1101,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-8" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -1063,6 +1124,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="memory-layout-9" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="0.5">
 <h2 data-id="quarto-animate-title">Memory Layout</h2>
@@ -1085,6 +1147,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
+<p><span class="aside-footnotes" style="">[Navarro-Hinojosa et al.&nbsp;2018, Chapter 3.2]</span></p>
 </section>
 <section id="results---coalescing-accesses" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Results - Coalescing Accesses</h2>
@@ -1093,6 +1156,7 @@ setTimeout(()=>{
 <!-- <span class="x-label">Number of Processes $N$</span> -->
 <p><span class="x-label">Lattice Updates per Second <span class="math inline">\(\left[\frac{1}{\sec}\right]\)</span></span></p>
 </div>
+<!-- <span class="plot-below">$+115\%$ (H100) $\quad$ $+195\%$ (A100) $\quad$ $+24\%$ (3060Ti)</span> -->
 <script>
     {   
         const yCats = ['coalesced', 'uncoalesced'];
@@ -1159,8 +1223,35 @@ setTimeout(()=>{
                 tickmode: 'array',
             },
             barmode: 'group',
-            // bargap: 0.2, // gap between groups
-            // bargroupgap: 0.1, // gap between bars within group
+            annotations: [
+                {
+                    x: ((28603-13306)/2+13306)*1e6,
+                    y: 2.05,
+                    text: '+115%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 20,
+                    ay: -40
+                },
+                {
+                    x: ((20249-6873)/2+6873)*1e6,
+                    y: 1.05,
+                    text: '+195%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 20,
+                    ay: -40
+                },
+                {
+                    x: ((2956-2390)/2+2390)*1e6,
+                    y: 0.05,
+                    text: '+24%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 20,
+                    ay: -40
+                },
+            ],
         };
 
         Plotly.newPlot('aos-soa', data, layout,{
@@ -1170,41 +1261,18 @@ setTimeout(()=>{
 </script>
 <p><span class="plot-description">Pull scheme, A100 and H100 (32000 <span class="math inline">\(\times\)</span> 32000), 3060Ti (3000 <span class="math inline">\(\times\)</span> 3000), 100 steps, <span class="math inline">\(\geq\)</span> 5 repeats, D2Q9 Shearwave Decay<span></span></span></p>
 </div>
-</section>
-<section id="results---coalescing-accesses-1" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">Results - Coalescing Accesses</h2>
-<ul>
-<li>Always prioritize coalescing memory accesses!</li>
-</ul>
-<table class="caption-top">
-<thead>
-<tr class="header">
-<th style="text-align: center;">GPU</th>
-<th style="text-align: center;">Speedup rel.</th>
-<th style="text-align: center;">Speedup abs.</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: center;">3060Ti</td>
-<td style="text-align: center;"><span class="math inline">\(24\%\)</span></td>
-<td style="text-align: center;">570 MLUPS</td>
-</tr>
-<tr class="even">
-<td style="text-align: center;">A100</td>
-<td style="text-align: center;"><span class="math inline">\(195\%\)</span></td>
-<td style="text-align: center;">13400 MLUPS</td>
-</tr>
-<tr class="odd">
-<td style="text-align: center;">H100</td>
-<td style="text-align: center;"><span class="math inline">\(115\%\)</span></td>
-<td style="text-align: center;">15296 MLUPS</td>
-</tr>
-</tbody>
-</table>
+<!-- ## Results - Coalescing Accesses {auto-animate=true}
+
+- Always prioritize coalescing memory accesses!
+
+| GPU  | Speedup rel. | Speedup abs. |
+|:------:|:------:|:------:|
+| 3060Ti  | $24\%$ | 570 MLUPS  | 
+| A100    | $195\%$  | 13400 MLUPS |  
+| H100    | $115\%$  | 15296 MLUPS |   -->
 </section>
 <section id="work-while-communicating" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">3. Work while communicating</h2>
+<h2 data-id="quarto-animate-title">4. Work while communicating</h2>
 </section>
 <section id="mpi-communication" class="slide level2 center" data-auto-animate="true" data-auto-animate-duration="1.0">
 <h2 data-id="quarto-animate-title">MPI Communication</h2>
@@ -1315,7 +1383,7 @@ setTimeout(()=>{
 <li>Block <strong>only if</strong> transfer not yet completed</li>
 <li>Work on outer nodes<sup>1</sup></li>
 </ol>
-<aside><ol class="aside-footnotes"><li id="fn3"><p>The Kokkos Lectures Module 6, Sandia National Laboratories, 2020</p></li></ol></aside></section>
+<aside><ol class="aside-footnotes"><li id="fn1"><p>The Kokkos Lectures Module 6, Sandia National Laboratories, 2020</p></li></ol></aside></section>
 <section id="results---weak-scaling" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Results - Weak Scaling</h2>
 <div class="center-xy">
@@ -1325,9 +1393,9 @@ setTimeout(()=>{
 <script>
     {
         // Example data
-        const xs = [1, 2, 4, 8];
-        const ys = [1.0, 0.9986878599005695, 0.9895404565891907, 0.9796576024637036];
-        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043, 0.00043811586968390913];
+        const xs = [1, 2, 4, 8, 16];
+        const ys = [1.0, 0.9986878599005695, 0.9895404565891907, 0.9796576024637036, 0.98134753959907];
+        const errors = [0.00045849417077719235, 0.0005705529725088642, 0.0006779119001179043, 0.00043811586968390913, 0.0006899703133274674];
         const trace = {
             x: xs,
             y: ys,
@@ -1372,49 +1440,6 @@ setTimeout(()=>{
 <p><span class="plot-description">Nvidia A100 GPUs, 32000 <span class="math inline">\(\times\)</span> 32000 nodes per process, 100 steps, 5 repeats, D2Q9 Shearwave Decay<span></span></span></p>
 </div>
 </section>
-<section id="over-optimization-and-precision" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">4. Over-optimization and Precision</h2>
-</section>
-<section id="micro-optimizations" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">Micro-optimizations</h2>
-<ul>
-<li>Don’t do NVCC’s job:
-<ol type="1">
-<li>Manual Loop-Unrolling</li>
-<li>Common Subexpression Elimination</li>
-<li>Arithmetic Simplification</li>
-<li>Read/Write reordering</li>
-</ol></li>
-</ul>
-<p><strong>NO</strong> significant difference (<span class="math inline">\(\pm\sigma\)</span>) for any tested GPU</p>
-</section>
-<section id="precision" class="slide level2 center" data-auto-animate="true">
-<h2 data-id="quarto-animate-title">Precision</h2>
-<ul>
-<li>Use <code>float</code> instead of <code>double</code> if possible!</li>
-</ul>
-<table class="caption-top">
-<thead>
-<tr class="header">
-<th style="text-align: center;">GPU</th>
-<th style="text-align: center;">relative Speedup for <code>float</code></th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: center;">3060Ti</td>
-<td style="text-align: center;"><span class="math inline">\(202\%\)</span></td>
-</tr>
-<tr class="even">
-<td style="text-align: center;">H100</td>
-<td style="text-align: center;"><span class="math inline">\(201\%\)</span></td>
-</tr>
-</tbody>
-</table>
-<ul>
-<li>Factor of two for variety of hardware</li>
-</ul>
-</section>
 <section id="thank-you-for-your-attention" class="slide level2 center">
 <h2>Thank you for your attention!</h2>
 <!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->
@@ -1434,7 +1459,7 @@ setTimeout(()=>{
 <li>Differentiable</li>
 <li>Only <span class="math inline">\(\sim 15\%\)</span> performance penalty<sup>1</sup></li>
 </ul>
-<aside><ol class="aside-footnotes"><li id="fn4"><p><span class="math inline">\(10^4\)</span> steps, <span class="math inline">\(1000^2\)</span> nodes of D2Q9-PBC on 3060Ti compared to peak of Kokkos (2503 MLUPS vs.&nbsp;2956 MLUPS)</p></li></ol></aside></section>
+<aside><ol class="aside-footnotes"><li id="fn2"><p><span class="math inline">\(10^4\)</span> steps, <span class="math inline">\(1000^2\)</span> nodes of D2Q9-PBC on 3060Ti compared to peak of Kokkos (2503 MLUPS vs.&nbsp;2956 MLUPS)</p></li></ol></aside></section>
 <section id="full-example" class="slide level2 center" data-auto-animate="true" data-auto-animate-unmatched="false">
 <h2 data-id="quarto-animate-title">Full example</h2>
 <div class="sourceCode" id="cb1"><pre class="sourceCode numberSource python number-lines code-with-copy" data-id="quarto-animate-code"><code class="sourceCode python hljs"><span id="cb1-1" class="hljs-ln-code"><a href=""></a><span class="co"># Imports</span></span>

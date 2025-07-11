@@ -206,17 +206,18 @@ bool output(Vel_t &vel, Dst_t &f, UINT LX, UINT LY, UINT HX, UINT HY, int rank){
 				},
 				Kokkos::Max<FLT>(max_vel_mag)
 			);
-			if (USE_MPI){
+
+			#if USE_MPI
 				// MPI: max-reduce the local maximum velocity magnitude, output on rank 0
 				FLT global_max {max_vel_mag};
 				MPI_Reduce(&max_vel_mag, &global_max, 1, MFLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
 				if (rank==0){
 					(*OUT_STREAM) << global_max << "," << std::flush;
 				}
-			} else {
+			#else 
 				// single node: just output the maximum velocity magnitude
 				(*OUT_STREAM) << max_vel_mag << "," << std::flush;
-			}
+			#endif
 		}
 		break;
 	case OUTPUT_TYPE::VEL_MAGS:

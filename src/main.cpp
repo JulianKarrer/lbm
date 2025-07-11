@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <chrono>
 #include "Kokkos_Core.hpp"
-#include <mpi.h>
 #include "macros.h"
 #include "global.h"
 #include "io.h"
@@ -22,6 +21,10 @@
 #endif
 #ifndef USE_MPI
 #define USE_MPI false
+#endif
+
+#if USE_MPI
+#include <mpi.h>
 #endif
 
 
@@ -85,6 +88,7 @@ bool run_simulation_single_node(){
 
 }
 
+#if USE_MPI
 bool run_simulation_mpi(){
 	// CREATE CARTESIAN COMMUNICATOR
 	// https://wgropp.cs.illinois.edu/courses/cs598-s15/lectures/lecture28.pdf
@@ -395,6 +399,7 @@ bool run_simulation_mpi(){
 
 	return true;
 }
+#endif
 
 
 // MAIN ENTRY POINT
@@ -414,7 +419,12 @@ int main(int argc, char *argv[]) {
 
 	// Run the simulation
 	auto start {std::chrono::high_resolution_clock::now()};
-	bool success = USE_MPI ? run_simulation_mpi() : run_simulation_single_node();
+
+	#if USE_MPI
+		bool success = run_simulation_mpi();
+	#else 
+		bool success =run_simulation_single_node();
+	#endif
 	auto end {std::chrono::high_resolution_clock::now()};
 	// print the MLUPS count
 	auto span {std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()};
