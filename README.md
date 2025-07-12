@@ -6,7 +6,7 @@ Setup
 ```bash
 cmake -S . -B build
 ```
-For the A100 nodes on the BWUniCluster use `cmake -S . -B build -DKokkos_ARCH_AMPERE80=ON` to avoid missing auto-detection of the target architecture. For H100, try `-DKokkos_ARCH_HOPPER90=ON`. On NEMO2 with MI300A, `CMAKE_PREFIX_PATH=/opt/rocm CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -S . -B build -DKokkos_ARCH_AMD_GFX942_APU=ON -DKokkos_ENABLE_HIP=ON` might be appropriate.
+For the A100 nodes on the BWUniCluster use `cmake -S . -B build -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE_80=ON` to avoid missing auto-detection of the target architecture. For H100, try `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_HOPPER90=ON`. On NEMO2 with MI300A, `CMAKE_PREFIX_PATH=/opt/rocm CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake .. -DKokkos_ARCH_AMD_GFX942_APU=ON -DKokkos_ENABLE_HIP=ON` in `/build` followed by `cmake --build .` might be appropriate.
 
 Compile 
 ```bash

@@ -177,8 +177,8 @@ text-align: center;
 ::: {.center-xy}
 
 <div id="vel-decay" class="plot-div">
-<span class="x-label">Time Steps</span>
-<span class="y-label">Velocity Amplitude</span>
+<span class="x-label">Time $\left(\frac{a}{c}\right)$</span>
+<span class="y-label">Velocity Amplitude $\left|\left|\vec{v}_{max}\right|\right|$ $(c)$</span>
 </div>
 <span class="plot-description">200k time steps of D2Q9 shearwave decay with $u_x(t=0)=0.1$, $\omega \in \left\{k\in ℕ_1^5\,|\, \frac{1}{k}\right\}$ on $1000\times 1000$ nodes<span>
 
@@ -192,13 +192,40 @@ text-align: center;
 <script>
 
     {   
-        const data = decays.map((decay)=>{
+        const linetypes = ['dot', 'dashdot', 'solid'];
+        const steps = decays[0]["ts"].length;
+        const col  = (i)=>'hsv('+((i)/decays.length*270+180)%360+', 100, 80)'
+
+        const annotate = (i, percent,turn ) => { return {
+            x:decays[i]["ts"][Math.floor(steps*percent)],
+            y:decays[i]["max_us"][Math.floor(steps*percent)],
+            text: "ω = "+decays[i]["omega"],
+            font: {
+                color: col(i),
+                size: 16,
+            },
+            showarrow: true,
+            xref: 'x',
+            yref: 'y',
+            ax: 10,
+            ay: -8,
+            textangle: turn,
+        }}
+
+        const data = decays.map((decay, i)=>{
             return {
                 x: decay["ts"],
                 y: decay["max_us"],
                 mode: 'lines',
                 type: 'scatter',
-                name: "ω = "+decay["omega"]
+                name: "ω = "+decay["omega"],
+                textposition: 'top right',
+                showlegend: true,
+                line: {
+                    dash: linetypes[i%linetypes.length],
+                    width: 3,
+                    color: col(i),
+                },
             };
         });
         
@@ -223,6 +250,14 @@ text-align: center;
                 tickmode: 'array',
             },
             barmode: 'group',
+            annotations: [
+                annotate(0, 0.15, 40),
+                annotate(1, 0.25, 30),
+                annotate(2, 0.35, 25),
+                annotate(3, 0.45, 20),
+                annotate(4, 0.60, 15),
+            ],
+            showlegend:false,
         };
 
         Plotly.newPlot('vel-decay', data, layout, {
@@ -239,7 +274,7 @@ text-align: center;
 
 <div id="vis-pred" class="plot-div">
 <span class="x-label">Relaxation Coefficient $\omega$</span>
-<span class="y-label">Viscosity $\nu$</span>
+<span class="y-label">Viscosity $\nu$ $\left(c \cdot a\right)$</span>
 </div>
 <span class="plot-description">200k time steps of D2Q9 shearwave decay with $u_x(t=0)=0.1$, $\omega \in \left\{k\in ℕ_1^5\,|\, \frac{1}{k}\right\}$ on $1000\times 1000$ nodes<span>
 
@@ -296,16 +331,16 @@ text-align: center;
 ## 1. Hand-Tuning and Precision {auto-animate=true}
 
 ## Micro-optimizations {auto-animate=true}
-- Don't do NVCC's job:
-    1. Manual Loop-Unrolling
-    2. Common Subexpression Elimination
-    3. Arithmetic Simplification
-    4. Read/Write reordering
+<!-- - small improvements: -->
+1. Manual Loop-Unrolling
+2. Common Subexpression Elimination
+3. Arithmetic Simplification
+4. Read/Write reordering
 
 **NO** significant difference ($\pm\sigma$) for any tested GPU
 
-- Try optional parameters for small improvements instead
-    - `Kokkos::MDRangePolicy` Tiling `{512, 1}` $\Longrightarrow 1.5\%$ improvement
+<!-- - Try optional parameters for small improvements instead
+    - `Kokkos::MDRangePolicy` Tiling `{512, 1}` $\Longrightarrow 1.5\%$ improvement -->
 
 ## Precision {auto-animate=true}
 - Use `float` instead of `double` if possible!
@@ -313,8 +348,8 @@ text-align: center;
 
 | GPU | relative Speedup for `float` | 
 |:------:|:------:|
-| 3060Ti  | $202\%$ | 
-| H100    | $201\%$ | 
+| 3060Ti  | $+102\%$ | 
+| H100    | $+101\%$ | 
 
 - Factor of two for variety of hardware
 
