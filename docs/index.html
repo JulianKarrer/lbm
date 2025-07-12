@@ -539,6 +539,10 @@ const decays = [{'ts': [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 
 <td style="text-align: center;"><span class="math inline">\(+102\%\)</span></td>
 </tr>
 <tr class="even">
+<td style="text-align: center;">MI300A</td>
+<td style="text-align: center;"><span class="math inline">\(+100\%\)</span></td>
+</tr>
+<tr class="odd">
 <td style="text-align: center;">H100</td>
 <td style="text-align: center;"><span class="math inline">\(+101\%\)</span></td>
 </tr>
@@ -831,7 +835,7 @@ setTimeout(()=>{
 <section id="results---push-vs.-pull" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Results - Push vs.&nbsp;Pull</h2>
 <div class="center-xy">
-<div id="pull-push" class="plot-div" style="height:400px">
+<div id="pull-push" class="plot-div" style="height:500px">
 <!-- <span class="x-label">Number of Processes $N$</span> -->
 <p><span class="x-label">Lattice Updates per Second <span class="math inline">\(\left[\frac{1}{\sec}\right]\)</span></span></p>
 </div>
@@ -841,11 +845,11 @@ setTimeout(()=>{
         const yCats = ['Push', 'Pull'];
         const yBase = [0, 1];
 
-        gpuNames = ["3060Ti", "A100", "H100"]
-        pushs = [2975.6781898284266e6, 19417.16863052674e6, 28175.800587975507e6]
-        pulls = [2956.481874510256e6, 20249.84516021208e6, 28603.662947854602e6, ]
-        err_push = [13.089266398514473e6,42.292797248931876e6,8.159538454552164e6]
-        err_pull = [9.795412811200736e6, 899.2927193996135e6, 7.147837461444218e6]
+        gpuNames = ["3060Ti", "MI300A", "A100", "H100", ]
+        pushs = [2975.6781898284266e6, 15011.280085548304e6, 19417.16863052674e6, 28175.800587975507e6]
+        pulls = [2956.481874510256e6, 15242.501280046698e6, 20249.84516021208e6, 28603.662947854602e6, ]
+        err_push = [13.089266398514473e6,21.789914188610346e6,42.292797248931876e6,8.159538454552164e6]
+        err_pull = [9.795412811200736e6, 165.79394010070496e6, 899.2927193996135e6, 7.147837461444218e6]
 
         const tracePush = {
             type: 'bar',
@@ -886,7 +890,7 @@ setTimeout(()=>{
         const layout = {
             template: 'plotly_dark',
             width: plot_width,
-            height: 400,
+            height: 500,
             font: { size: 18, color: 'white', family: 'Degular', },
             plot_bgcolor: '#191919',
             paper_bgcolor: '#191919',
@@ -907,7 +911,7 @@ setTimeout(()=>{
             annotations: [
                 {
                     x: ((28175-28603)/2+28603)*1e6,
-                    y: 2.1,
+                    y: 3.1,
                     text: '+1.5%',
                     showarrow: true,
                     arrowcolor:"#bbb",
@@ -916,8 +920,17 @@ setTimeout(()=>{
                 },
                 {
                     x: ((20249-19417)/2+19417)*1e6,
-                    y: 1.0-0.5,
+                    y: 2.0-0.5,
                     text: '+4.3%',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 30,
+                    ay: 40
+                },
+                {
+                    x: ((15242-15011)/2+15011)*1e6,
+                    y: 1.0-0.5,
+                    text: '+1.5%',
                     showarrow: true,
                     arrowcolor:"#bbb",
                     ax: 30,
@@ -1190,11 +1203,11 @@ setTimeout(()=>{
     {   
         const yCats = ['coalesced', 'uncoalesced'];
         const yBase = [0, 1];
-        const gpuNames = ["3060 Ti", "A100", "H100"]
-        const coalesced   = [2956.481874510256e6,20249.84516021208e6,28603.662947854602e6];
-        const uncoalesced = [2390.175457634095e6,6873.190050571908e6,13306.991294064826e6];
-        const errCoal = [9.795412811200736e6,899.2927193996135e6,7.147837461444218e6];
-        const errUnc  = [6.415700428839631e6,95.98548628921101e6,172.22660059878717e6];
+        const gpuNames = ["3060 Ti", "MI300A", "A100", "H100"]
+        const coalesced   = [2956.481874510256e6,15242.501280046698e6, 20249.84516021208e6,28603.662947854602e6];
+        const uncoalesced = [2390.175457634095e6,12088.267990828119e6,6873.190050571908e6,13306.991294064826e6];
+        const errCoal = [9.795412811200736e6,165.7939401007049636, 899.2927193996135e6,7.147837461444218e6];
+        const errUnc  = [6.415700428839631e6,231.50406029970617e6,95.98548628921101e6,172.22660059878717e6];
 
         const traceCoal = {
             type: 'bar',
@@ -1229,6 +1242,24 @@ setTimeout(()=>{
             marker: { color: 'lightblue' },
         };
 
+        // const traceSpecial = {
+        //     type: 'bar',
+        //     orientation: 'h',
+        //     name: 'Push Uncoalesced',
+        //     x: [0, 8989.053798710216e6, 0, 0],
+        //     y: gpuNames,
+        //     marker: { color: 'orange' },
+        //     error_x: {
+        //         type: 'data',
+        //         array: [0, 45.013599571900286e6, 0, 0],
+        //         visible: true,
+        //         thickness: 1,
+        //         width: 20,
+        //         color: '#ddd'
+        //     },
+        // };
+
+
         let data = [traceCoal,traceUnc];
        
         const layout = {
@@ -1255,21 +1286,30 @@ setTimeout(()=>{
             annotations: [
                 {
                     x: ((28603-13306)/2+13306)*1e6,
-                    y: 2.05,
+                    y: 1+2.05,
                     text: '+115%',
                     showarrow: true,
                     arrowcolor:"#bbb",
                     ax: 20,
-                    ay: -40
+                    ay: -30
                 },
                 {
                     x: ((20249-6873)/2+6873)*1e6,
-                    y: 1.05,
+                    y: 1+1.05,
                     text: '+195%',
                     showarrow: true,
                     arrowcolor:"#bbb",
                     ax: 20,
-                    ay: -40
+                    ay: -30
+                },
+                {
+                    x: ((15242-12088)/2+12088)*1e6,
+                    y: 1.05,
+                    text: '+26% (Push: +67%)',
+                    showarrow: true,
+                    arrowcolor:"#bbb",
+                    ax: 60,
+                    ay: -30
                 },
                 {
                     x: ((2956-2390)/2+2390)*1e6,
@@ -1278,7 +1318,7 @@ setTimeout(()=>{
                     showarrow: true,
                     arrowcolor:"#bbb",
                     ax: 20,
-                    ay: -40
+                    ay: -30
                 },
             ],
         };
