@@ -996,22 +996,97 @@ Communicate each border and corner asynchronously
 
 {{< include ./mpi-comm3.qmd >}}
 
-$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
+<span data-id="onsquared">$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes</span>
 
 ## MPI Communication
 
 {{< include ./mpi-comm4.qmd >}}
 
-$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
+<span data-id="onsquared">$\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes</span>
 
+
+<style>
+    .spcont{
+        display: flex;
+        flex-direction: column;
+        /* align-items: center; */
+        margin: 20px;
+        margin-bottom: 50px;
+        font-size:14pt;
+    }
+    .send{width: calc(11 * 14pt)}
+    .recv{width: calc(17.2 * 14pt)}
+    .sp{
+        border: 1px solid #eee;
+        border-radius:5px;
+        padding:4px;
+        display: inline-block;
+        text-align:center;
+        margin-left:5px;
+    }
+    .spt{
+        width:40pt;
+        display: inline-block;
+        text-align:center;
+        margin-left:5px;
+        margin-right:20px;
+    }
+</style>
 
 ## MPI Communication {auto-animate=true}
+
 1. Post all `IRecv`
 2. Pack Buffers and `ISend` them
 3. Work on inner nodes during data transfer!
 4. Block **only if** transfer not yet completed
 5. Work on outer nodes^[The Kokkos Lectures Module 6, Sandia National Laboratories, 2020]
 
+<div class="spcont">
+<div style="display:flex; flex-direction:row;">
+<span class="spt">Host</span>
+<span class="sp recv">Receive Data</span>
+</div>
+<div style="display:flex; flex-direction:row;">
+<span class="spt">    </span>
+<span class="sp" style="opacity:0;">Pack Buffers</span>
+<span class="sp send">Send Data</span>
+</div>
+<div style="display:flex; flex-direction:row;">
+<span data-id="dev1" class="spt">Device</span>
+<span data-id="dev2" class="sp">Pack Buffers</span>
+<span data-id="span-inner" class="sp" style="width:100pt;">Inner Update</span>
+<span data-id="dev3" class="sp">Block?</span>
+<span data-id="dev4" class="sp">Outer Update</span>
+</div>
+</div>
+
+
+## MPI Communication {auto-animate=true}
+
+1. Post all `IRecv`
+2. Pack Buffers and `ISend` them
+3. Work on inner nodes during data transfer!
+4. Block **only if** transfer not yet completed
+5. Work on outer nodes^[The Kokkos Lectures Module 6, Sandia National Laboratories, 2020]
+
+<div class="spcont">
+<div style="display:flex; flex-direction:row;">
+<span class="spt">Host</span>
+<span class="sp recv">Receive Data</span>
+</div>
+<div style="display:flex; flex-direction:row;">
+<span class="spt">    </span>
+<span class="sp" style="opacity:0;">Pack Buffers</span>
+<span class="sp send">Send Data</span>
+</div>
+<div style="display:flex; flex-direction:row;">
+<span data-id="dev1" class="spt">Device</span>
+<span data-id="dev2" class="sp">Pack Buffers</span>
+<span data-id="span-inner" class="sp" style="width:400pt;">Inner Update</span>
+<span data-id="dev3" class="sp" style="opacity:0; position:absolute;">Block?</span>
+<span data-id="dev4" class="sp">Outer Update</span>
+</div>
+</div>
 
 ## Results - Weak Scaling {auto-animate=true}
 ::: {.center-xy}
@@ -1073,7 +1148,7 @@ $\mathcal{O}(N)$ halo nodes $\ll$ $\mathcal{O}(N^2)$ inner nodes
 <span class="plot-description">Nvidia A100 GPUs, 32000 $\times$ 32000 nodes per process, 100 steps, 5 repeats, D2Q9 Shearwave Decay<span>
 :::
 
-## Thank you for your attention?
+## Thank you for your attention? {auto-animate=true}
 
 
 <!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->

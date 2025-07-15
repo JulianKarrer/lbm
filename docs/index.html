@@ -1422,7 +1422,7 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
-<p><span class="math inline">\(\mathcal{O}(N)\)</span> halo nodes <span class="math inline">\(\ll\)</span> <span class="math inline">\(\mathcal{O}(N^2)\)</span> inner nodes</p>
+<p><span data-id="onsquared"><span class="math inline">\(\mathcal{O}(N)\)</span> halo nodes <span class="math inline">\(\ll\)</span> <span class="math inline">\(\mathcal{O}(N^2)\)</span> inner nodes</span></p>
 </section>
 <section id="mpi-communication-3" class="slide level2 center">
 <h2>MPI Communication</h2>
@@ -1441,7 +1441,34 @@ setTimeout(()=>{
     </div>
 </div>
 </div>
-<p><span class="math inline">\(\mathcal{O}(N)\)</span> halo nodes <span class="math inline">\(\ll\)</span> <span class="math inline">\(\mathcal{O}(N^2)\)</span> inner nodes</p>
+<p><span data-id="onsquared"><span class="math inline">\(\mathcal{O}(N)\)</span> halo nodes <span class="math inline">\(\ll\)</span> <span class="math inline">\(\mathcal{O}(N^2)\)</span> inner nodes</span></p>
+<style>
+    .spcont{
+        display: flex;
+        flex-direction: column;
+        /* align-items: center; */
+        margin: 20px;
+        margin-bottom: 50px;
+        font-size:14pt;
+    }
+    .send{width: calc(11 * 14pt)}
+    .recv{width: calc(17.2 * 14pt)}
+    .sp{
+        border: 1px solid #eee;
+        border-radius:5px;
+        padding:4px;
+        display: inline-block;
+        text-align:center;
+        margin-left:5px;
+    }
+    .spt{
+        width:40pt;
+        display: inline-block;
+        text-align:center;
+        margin-left:5px;
+        margin-right:20px;
+    }
+</style>
 </section>
 <section id="mpi-communication-4" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">MPI Communication</h2>
@@ -1452,7 +1479,39 @@ setTimeout(()=>{
 <li>Block <strong>only if</strong> transfer not yet completed</li>
 <li>Work on outer nodes<sup>1</sup></li>
 </ol>
+<div class="spcont">
+<div style="display:flex; flex-direction:row;">
+<p><span class="spt">Host</span> <span class="sp recv">Receive Data</span></p>
+</div>
+<div style="display:flex; flex-direction:row;">
+<p><span class="spt"> </span> <span class="sp" style="opacity:0;">Pack Buffers</span> <span class="sp send">Send Data</span></p>
+</div>
+<div style="display:flex; flex-direction:row;">
+<p><span class="spt" data-id="dev1">Device</span> <span class="sp" data-id="dev2">Pack Buffers</span> <span class="sp" data-id="span-inner" style="width:100pt;">Inner Update</span> <span class="sp" data-id="dev3">Block?</span> <span class="sp" data-id="dev4">Outer Update</span></p>
+</div>
+</div>
 <aside><ol class="aside-footnotes"><li id="fn1"><p>The Kokkos Lectures Module 6, Sandia National Laboratories, 2020</p></li></ol></aside></section>
+<section id="mpi-communication-5" class="slide level2 center" data-auto-animate="true">
+<h2 data-id="quarto-animate-title">MPI Communication</h2>
+<ol type="1">
+<li>Post all <code>IRecv</code></li>
+<li>Pack Buffers and <code>ISend</code> them</li>
+<li>Work on inner nodes during data transfer!</li>
+<li>Block <strong>only if</strong> transfer not yet completed</li>
+<li>Work on outer nodes<sup>1</sup></li>
+</ol>
+<div class="spcont">
+<div style="display:flex; flex-direction:row;">
+<p><span class="spt">Host</span> <span class="sp recv">Receive Data</span></p>
+</div>
+<div style="display:flex; flex-direction:row;">
+<p><span class="spt"> </span> <span class="sp" style="opacity:0;">Pack Buffers</span> <span class="sp send">Send Data</span></p>
+</div>
+<div style="display:flex; flex-direction:row;">
+<p><span class="spt" data-id="dev1">Device</span> <span class="sp" data-id="dev2">Pack Buffers</span> <span class="sp" data-id="span-inner" style="width:400pt;">Inner Update</span> <span class="sp" data-id="dev3" style="opacity:0; position:absolute;">Block?</span> <span class="sp" data-id="dev4">Outer Update</span></p>
+</div>
+</div>
+<aside><ol class="aside-footnotes"><li id="fn2"><p>The Kokkos Lectures Module 6, Sandia National Laboratories, 2020</p></li></ol></aside></section>
 <section id="results---weak-scaling" class="slide level2 center" data-auto-animate="true">
 <h2 data-id="quarto-animate-title">Results - Weak Scaling</h2>
 <div class="center-xy">
@@ -1509,8 +1568,8 @@ setTimeout(()=>{
 <p><span class="plot-description">Nvidia A100 GPUs, 32000 <span class="math inline">\(\times\)</span> 32000 nodes per process, 100 steps, 5 repeats, D2Q9 Shearwave Decay<span></span></span></p>
 </div>
 </section>
-<section id="thank-you-for-your-attention" class="slide level2 center">
-<h2>Thank you for your attention?</h2>
+<section id="thank-you-for-your-attention" class="slide level2 center" data-auto-animate="true">
+<h2 data-id="quarto-animate-title">Thank you for your attention?</h2>
 <!-- # Taichi {auto-animate=true background-image="res/taichi.png"} -->
 </section></section>
 <section>
@@ -1528,7 +1587,7 @@ setTimeout(()=>{
 <li>Differentiable</li>
 <li>Only <span class="math inline">\(\sim 15\%\)</span> performance penalty<sup>1</sup></li>
 </ul>
-<aside><ol class="aside-footnotes"><li id="fn2"><p><span class="math inline">\(10^4\)</span> steps, <span class="math inline">\(1000^2\)</span> nodes of D2Q9-PBC on 3060Ti compared to peak of Kokkos (2503 MLUPS vs.&nbsp;2956 MLUPS)</p></li></ol></aside></section>
+<aside><ol class="aside-footnotes"><li id="fn3"><p><span class="math inline">\(10^4\)</span> steps, <span class="math inline">\(1000^2\)</span> nodes of D2Q9-PBC on 3060Ti compared to peak of Kokkos (2503 MLUPS vs.&nbsp;2956 MLUPS)</p></li></ol></aside></section>
 <section id="full-example" class="slide level2 center" data-auto-animate="true" data-auto-animate-unmatched="false">
 <h2 data-id="quarto-animate-title">Full example</h2>
 <div class="sourceCode" id="cb1"><pre class="sourceCode numberSource python number-lines code-with-copy" data-id="quarto-animate-code"><code class="sourceCode python hljs"><span id="cb1-1" class="hljs-ln-code"><a href=""></a><span class="co"># Imports</span></span>
