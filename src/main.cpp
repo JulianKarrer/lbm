@@ -209,7 +209,7 @@ bool run_simulation_mpi(){
 			init_rest(f, rho_init); break;
 		default:
 			DUI y_below = create_device_uint(Y_GLOBAL_BELOW); // global y offset: how many nodes are below the rank-local y=0?
-			DUI y_glob = create_device_uint(NY_glob);		  // global y size: how mnay nodes exist globally in y-direction?
+			DUI y_glob = create_device_uint(NY_glob);		  // global y size: how many nodes exist globally in y-direction?
 			init_shearwave(f, rho_init, u, y_below, y_glob); break;
 	}
 

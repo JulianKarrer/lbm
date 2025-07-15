@@ -98,7 +98,7 @@ if __name__=="__main__":
     name = datetime.now().strftime("%Y_%m_%d_%H:%M:%S")
     with open(f"benchmark{name}.results","w") as f:
         f.write(f"""
-{NX}x{NY} for {STEPS} steps, {REPEATS} repeats, using mpi: {USE_MPI}
+{NX**2}x{NY**2} for {STEPS} steps, {REPEATS} repeats, using mpi: {USE_MPI}
 
 pull_unrolled   {pull_unrolled[0]} +- {pull_unrolled[1]}, min {pull_unrolled[2]}, max {pull_unrolled[3]}
 push_unrolled   {push_unrolled[0]} +- {push_unrolled[1]}, min {push_unrolled[2]}, max {push_unrolled[3]}

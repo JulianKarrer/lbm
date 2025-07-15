@@ -47,4 +47,13 @@ Optional arguments:
 To run the LBM solver in the `taichi` directory, Python 3.10 (see `.python-version`) and `python3 -m pip install taichi numpy matplotlib` are required
 
 ## Presentation
-A Quarto/RevealJS presentation of the results is found in the `/docs` folder or on [GitHub Pages](https://juliankarrer.github.io/lbm/)
+A Quarto/RevealJS presentation of the results is found in the `/docs` folder or on [GitHub Pages](https://juliankarrer.github.io/lbm/).
+
+A PDF-Version can be exported by pressing `e` or found in this repository (`/docs/karrer_gpu_presentation.pdf`)
+
+## Reproducing Results
+- `benchmark.py` was used for benchmarking the variations of the implementation (coalescing? double precision? unroll loops? etc.) on various GPUs 
+- `shear-wave.py` was used to confirm correctness by comparing measured dynamic viscosity ν over relaxation parameter ω to the analytic solution
+- `shearwave-video.py` generates a video visualizing the magnitude of the velocity field during a shearwave decay
+- `lid-driven-stationary.py` generates a video of a lid driven cavity scene, including a visualization of the velocity magnitude, the direction as a quiver plot and the streamline plot
+- `problem-size.py` tests the performance of an implementation at different domain sizes 

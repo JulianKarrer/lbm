@@ -15,8 +15,8 @@ from io import StringIO
 
 plt.rcParams.update({"text.usetex": True,})
 
-RECOMPILE = False
-RUN = False
+RECOMPILE = True
+RUN = True
 
 NX = 2**10 # 2048
 NY = 2**10 # 2048

@@ -18,11 +18,10 @@ NY = 1000
 TOTAL_STEPS = 200_000
 OMEGA_STEPS = 5
 OMEGAS = [(1./OMEGA_STEPS)*i for i in range(1,OMEGA_STEPS+1)]
-RANKS = 1
-# OMEGAS = [0.5]
+MPI_RANKS = 1
 
 
-# set up plots
+# Set up plots
 TITLE_FONT_SIZE = 14
 fig_max, ax_max = plt.subplots()
 ax_max.set_xlabel(r"$t$")
@@ -58,7 +57,7 @@ decays = []
 
 for omega in OMEGAS:
     # run the program, get the output
-    command = f"{f"mpirun -n {RANKS} " if RANKS>1 else ""}./main -w {omega} -nx {NX} -ny {NY} -of {DUMP_EVERY} -s {TOTAL_STEPS} -omv"
+    command = f"{f"mpirun -n {MPI_RANKS} " if MPI_RANKS>1 else ""}./main -w {omega} -nx {NX} -ny {NY} -of {DUMP_EVERY} -s {TOTAL_STEPS} -omv"
     print("command running:", command)
     output = subprocess.run(command.split(" "), cwd="build",stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False)
     res = output.stdout
@@ -88,8 +87,6 @@ for omega in OMEGAS:
     # plot the expected and measured velocity amplitude evolution
     ax_max.plot(ts, max_us, label=r"$\omega = "+'{:3.2f}'.format(omega)+r"$")
     decays += [{"ts":ts, "max_us":max_us, "omega":omega}]
-    # ax_max.plot(ts, [exp(t,a0_fit, measured_nu, c_fit) for t in ts], "--", label=r"fit ($\omega = "+str(omega)+r"$)")
-    # ax_max.plot(ts, max_us, label=r"data ($\omega = "+str(omega)+r"$)")
 
 # plot the measured viscosity as a funciton of omega and the errors
 ax_om_nu.plot(OMEGAS, [nu_from_omega(om) for om in OMEGAS], "-r", label="expected viscosity")
